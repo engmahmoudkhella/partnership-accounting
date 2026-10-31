@@ -103,6 +103,28 @@ python run.py            # http://127.0.0.1:8000
 **النسخ الاحتياطي:** من الإعدادات ← «تنزيل نسخة احتياطية» (ملف SQLite كامل)، أو انسخ مجلد `data/`.
 احفظ نسخة أسبوعياً على الأقل خارج الخادم.
 
+## الرفع على خادم (VPS بنظام Ubuntu/Debian)
+
+السكربت `deploy/install.sh` يجهّز كل شيء بأمر واحد، ولا يمس أي مشروع آخر موجود على الخادم:
+- يعمل بمستخدم خاص على منفذ داخلي خاص به (8077).
+- يضيف ملف nginx منفصلاً، ويختبر الإعدادات قبل تطبيقها ويتراجع إن فشلت.
+- يفعّل HTTPS، ونسخاً احتياطياً يومياً يُحفظ 60 يوماً في `/var/backups/partnership-accounting`.
+
+```bash
+# 1) مفتاح للقراءة فقط من المستودع الخاص (يُضاف في GitHub: Settings → Deploy keys)
+ssh-keygen -t ed25519 -f /root/.ssh/pa_deploy -N ""
+cat /root/.ssh/pa_deploy.pub
+# 2) نسخ المشروع إلى /opt
+GIT_SSH_COMMAND="ssh -i /root/.ssh/pa_deploy -o StrictHostKeyChecking=accept-new" \
+  git clone git@github.com:engmahmoudkhella/partnership-accounting.git /opt/partnership-accounting
+git -C /opt/partnership-accounting config core.sshCommand "ssh -i /root/.ssh/pa_deploy"
+# 3) التنصيب: بدون نطاق يعمل على https://IP:8443 ، ومع نطاق: DOMAIN=accounts.example.com
+bash /opt/partnership-accounting/deploy/install.sh
+```
+
+التحديث لاحقاً: `bash /opt/partnership-accounting/deploy/update.sh` (يأخذ نسخة احتياطية أولاً).
+السجلات: `journalctl -u partnership-accounting -f`.
+
 ## الاختبارات
 
 ```bash
