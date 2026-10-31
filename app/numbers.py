@@ -16,8 +16,9 @@ Design rules (see README, section "Numbers"):
   removed. A shekel sign or the words "ILS", "شيكل", "شيقل", "شواكل" around the
   number are removed. Any other text is an error.
 * Negative numbers, exponents, ".5", "5." and more decimals than allowed are
-  errors. Extra decimals that are all zeros ("10.500" for money) are accepted
-  because the value is exact.
+  errors. For money any third decimal is refused, even "10.500", because
+  "1.500" is how many people write 1,500 and we never guess. For quantities
+  and percentages extra trailing zeros are accepted.
 * Values are never rounded silently.
 """
 
@@ -92,7 +93,7 @@ def _clean(text) -> str:
     return s
 
 
-def _parse_decimal(text, decimals: int) -> int:
+def _parse_decimal(text, decimals: int, strict_decimals: bool = False) -> int:
     """Return the value multiplied by 10**decimals as an exact int."""
     s = _clean(text)
     if s.startswith("-") or s.startswith("−") or (s.startswith("(") and s.endswith(")")):
@@ -119,6 +120,12 @@ def _parse_decimal(text, decimals: int) -> int:
         raise NumberError("err_number_format")
     int_part = m.group(1).replace(",", "")
     frac = m.group(2) or ""
+    if strict_decimals and len(frac) > decimals:
+        # "1.500" is how many people write one thousand five hundred. For money we never guess:
+        # more decimals than agorot is an error, with a hint when it looks like a thousands dot.
+        if len(frac) == 3 and "," not in m.group(1):
+            raise NumberError("err_number_dot_thousands", value=int_part + frac)
+        raise NumberError("err_number_too_many_decimals", decimals=decimals)
     if len(frac) > decimals:
         extra = frac[decimals:]
         if set(extra) != {"0"}:
@@ -130,7 +137,7 @@ def _parse_decimal(text, decimals: int) -> int:
 
 def parse_money(text, *, allow_zero: bool = False) -> int:
     """Parse a shekel amount and return agorot (int)."""
-    value = _parse_decimal(text, MONEY_DECIMALS)
+    value = _parse_decimal(text, MONEY_DECIMALS, strict_decimals=True)
     if value == 0 and not allow_zero:
         raise NumberError("err_number_zero")
     if value > MAX_MONEY_MINOR:
@@ -251,12 +258,23 @@ def line_total(qty_milli: int, unit_price_minor: int) -> int:
     return round_half_up_div(qty_milli * unit_price_minor, 1000)
 
 
-def allocate(amount: int, weights: list[tuple[object, int]]) -> dict:
+def parse_id(text) -> int | None:
+    """An id from a form/query value. Empty -> None. Anything but ASCII/Arabic digits -> NumberError."""
+    s = normalize_digits(str(text or "").strip())
+    if s == "":
+        return None
+    if not re.fullmatch(r"[0-9]{1,18}", s):
+        raise NumberError("err_invalid_choice")
+    return int(s)
+
+
+def allocate(amount: int, weights: list[tuple[object, int]], tie_offset: int = 0) -> dict:
     """Split ``amount`` (int, may be negative) by integer ``weights``.
 
     Largest-remainder method: every part is floor/ceil of its exact share and
     the parts always add up to exactly ``amount``. Ties are broken by the order
-    of ``weights`` so the result is deterministic.
+    of ``weights`` rotated by ``tie_offset`` (deterministic, but callers rotate it
+    so the same partner does not always receive the extra agora).
     """
     total_w = sum(w for _, w in weights)
     if total_w <= 0:
@@ -268,6 +286,7 @@ def allocate(amount: int, weights: list[tuple[object, int]]) -> dict:
         q, r = divmod(a * w, total_w)
         parts.append([key, q, r, idx])
     left = a - sum(p[1] for p in parts)
-    for p in sorted(parts, key=lambda p: (-p[2], p[3]))[:left]:
+    n = len(parts)
+    for p in sorted(parts, key=lambda p: (-p[2], (p[3] - tie_offset) % n))[:left]:
         p[1] += 1
     return {p[0]: sign * p[1] for p in parts}

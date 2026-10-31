@@ -34,12 +34,16 @@ Every partner sees every transaction as soon as it is recorded, and nothing that
 
 **الأرقام.** يُقبل الإدخال بالأرقام العربية (١٢٣) والإنجليزية (123) والفارسية، وحتى المختلطة. الفاصلة العشرية `.` أو `٫`،
 وفاصل الآلاف `,` أو `٬` أو `،` أو مسافة، بشرط أن تكون المجموعات ثلاثية صحيحة. لذلك يُرفض `12,5` بدل أن يُقرأ 125،
-ويظهر للمستخدم: «استخدم النقطة للكسور». لا تقريب صامت: `17.555` يُرفض لأن الشيكل خانتان فقط. تُحذف علامات الاتجاه
+ويظهر للمستخدم: «استخدم النقطة للكسور». وكذلك يُرفض `1.500` بدل أن يُقرأ شيكلاً ونصفاً، مع سؤال: «هل تقصد 1500؟».
+لا تقريب صامت أبداً: الشيكل خانتان عشريتان فقط. تُحذف علامات الاتجاه
 المخفية التي تأتي مع النسخ واللصق، ويُقبل `₪` و«شيكل». تحت الخانة يظهر فوراً ما سيُحفظ فعلاً: «سيُحفظ: 1,234.50».
 كل المبالغ تُخزَّن أعداداً صحيحة بالأغورة، فلا يوجد أي خطأ تقريب.
 
 **النسب.** الأدق: «نسبة بأعداد صحيحة» 3:1:1:1، فيأخذ كل شريك الثلث بالضبط من الخمسين بالمئة. أي مبلغ يُقسم بطريقة
-«الباقي الأكبر» فيكون مجموع الحصص مساوياً للمبلغ حتى الأغورة. للنسب تاريخ سريان، وتغييرها لا يغيّر أرباح الأيام السابقة.
+«الباقي الأكبر» فيكون مجموع الحصص مساوياً للمبلغ حتى الأغورة. للنسب تاريخ سريان، وتغييرها لا يغيّر أرباح الأيام السابقة. الربح يُقسم مرة واحدة لكل فترة نسب،
+فلا يتراكم فرق التقريب يوماً بعد يوم.
+عند توزيع الأرباح يأخذ كل شريك من ربحه الذي لم يستلمه بعد. ما دامت النسب لم تتغير فهذا يطابق نسب الحصص.
+إن تغيرت، يأخذ كل شريك ما كسبه فعلاً بالنسب القديمة، ولا يستلم أي شريك أكثر من حصته من الربح.
 
 **الحذف.**
 - الحركة المرحَّلة **لا تُحذف أبداً**. تُلغى مع سبب مكتوب: يزول أثرها من كل الأرصدة، وتبقى ظاهرة مشطوبة، ويُسجَّل من ألغاها ومتى ولماذا.
@@ -65,7 +69,8 @@ Every partner sees every transaction as soon as it is recorded, and nothing that
 **الموافقة الجماعية.** مصروف أو شراء أصل فوق الحد (من الإعدادات) لا يدخل الحسابات حتى يوافق كل شريك له حساب.
 رفض واحد يرفضه، وأي تعديل يعيد جولة الموافقة.
 
-**إقفال الشهر.** كل شريك يعتمد كشف الشهر، ثم يقفله المدير. بعد الإقفال لا إضافة ولا تعديل ولا إلغاء في ذلك الشهر.
+**إقفال الشهر.** كل شريك يعتمد كشف الشهر، ثم يقفله المدير. الأشهر تُقفل بالترتيب وتُفتح من الأحدث، فلا يمكن لأي تغيير
+بتاريخ قديم أن يغيّر رصيد شهر مقفل. بعد الإقفال لا إضافة ولا تعديل ولا إلغاء في ذلك الشهر.
 أي تغيير قبل الإقفال يلغي الاعتمادات تلقائياً حتى يراجع الشركاء من جديد.
 
 **سجل الرقابة.** كل عملية تُسجَّل مع القيم قبل وبعد: إنشاء، تعديل، إلغاء، حذف، موافقة، دخول، محاولة دخول فاشلة، نسخ احتياطي.
@@ -102,7 +107,7 @@ python run.py            # http://127.0.0.1:8000
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest -q tests                  # 356 اختباراً
+python -m pytest -q tests                  # 385 اختباراً
 PROP_EXAMPLES=400 python -m pytest tests/test_property.py   # تشغيل عشوائي مكثف
 node e2e/run.js                            # متصفح حقيقي (Playwright)
 ```
@@ -114,7 +119,7 @@ node e2e/run.js                            # متصفح حقيقي (Playwright)
 | `test_documents.py` | القيد الناتج عن كل نوع حركة، وكل قاعدة تحقق، والسحب على المكشوف بأثر رجعي |
 | `test_void_delete_edit.py` | الإلغاء يعيد كل رصيد كما كان تماماً، الإلغاء المرفوض وأسبابه، الحذف النهائي، التعديل، إلغاء الاعتمادات، حذف الشركاء والحسابات والمستخدمين |
 | `test_approvals_locks.py` | حد الموافقة، الرفض، إعادة الجولة، الترحيل المؤجل، إقفال الأشهر واعتمادها |
-| `test_property.py` | مئات التسلسلات العشوائية من العمليات (أغلبها خاطئ عمداً)، ويُتحقق بعد كل خطوة من كل الضوابط |
+| `test_property.py` | مئات التسلسلات العشوائية من العمليات (أغلبها خاطئ عمداً)، ويُتحقق بعد كل خطوة من كل الضوابط، ومنها أن لا يستلم شريك أكثر من ربحه |
 | `test_http.py` | النماذج الحقيقية بالعربية والإنجليزية، رسائل الخطأ، الصلاحيات، CSRF، رفع الملفات، اكتمال الترجمة في كل صفحة، التصدير |
 | `e2e/run.js` | جولة كاملة في Chromium: إعداد، شركاء، أرصدة، مصاريف، إلغاء، إنجليزي، جوال |
 
@@ -132,9 +137,12 @@ profit distributions (split by share, capped at collected profit) and daily prod
 ### Accuracy rules
 - **Numbers**: Arabic-Indic, Persian, ASCII and mixed digits; `.`/`٫` decimal; `,` `٬` `،` space as thousands separators
   only in valid groups of three, so `12,5` is rejected with a hint instead of being read as 125. Nothing is rounded
-  silently. Every amount is stored as integer agorot. Each money field previews what will be saved as you type.
+  silently, and money never accepts a third decimal (`1.500` is refused with "did you mean 1500?").
+  Every amount is stored as integer agorot. Each money field previews what will be saved as you type.
 - **Shares**: an exact whole-number ratio (3:1:1:1) or percentages totalling 100%, with effective dates. Every split
-  uses the largest-remainder method, so parts always add up to the agora.
+  uses the largest-remainder method, so parts always add up to the agora; profit is split once per share period so
+  rounding never accumulates. A distribution pays each partner from his own undistributed profit, so after a change
+  of shares everyone still receives what he earned, and nobody can receive more than his share.
 - **Deletion**: a posted transaction is never deleted; it is *voided* with a reason, which removes its effect exactly
   and keeps it visible. A void is refused when it would break the books (money already spent, invoice already paid,
   profit already distributed, asset already sold, call already paid). Only unposted (pending/rejected) transactions can
@@ -143,7 +151,8 @@ profit distributions (split by share, capped at collected profit) and daily prod
   asset negative on any day; distributions ≤ collected profit. A failing operation leaves nothing behind.
 - **Approvals**: expenses/asset purchases above a threshold need every partner's approval; one rejection rejects; any
   edit restarts the round.
-- **Month close**: partners sign off, the admin locks; a locked month cannot change; any change clears sign-offs.
+- **Month close**: partners sign off, the admin locks months in order (and unlocks newest first), so no backdated
+  change can alter a locked month; any change clears sign-offs.
 - **Audit log** of every action with before/after values; no screen can edit it.
 
 ### Run

@@ -214,7 +214,9 @@ def test_expense_amount_from_form(ready, typed, expected):
     ("12,5", "استخدم النقطة", "Use a dot"),
     ("abc", "صيغة الرقم غير صحيحة", "Invalid number"),
     ("-5", "لا يُقبل رقم سالب", "Negative numbers"),
-    ("17.555", "الحد الأقصى 2 خانات", "At most 2 decimal"),
+    ("17.555", "هل تقصد 17555", "Did you mean 17555"),
+    ("1.500", "هل تقصد 1500", "Did you mean 1500"),
+    ("1.5555", "الحد الأقصى 2 خانات", "At most 2 decimal"),
     ("0", "أكبر من صفر", "greater than zero"),
     ("", "أدخل رقماً", "Enter a number"),
     ("$5", "صيغة الرقم غير صحيحة", "Invalid number"),
@@ -539,6 +541,41 @@ def test_no_page_shows_a_raw_translation_key(ready, lang):
 
 
 # ------------------------------------------------------------------ export / backup / misc
+
+def test_odd_digit_characters_do_not_crash(ready):
+    c = ready
+    r = c.post("/documents/new/CONTRIBUTION", {"date": "2026-10-02", "partner_id": "²",
+                                               "money_account_id": c.ids["cash"], "amount": "1"},
+               page="/documents/new/CONTRIBUTION")
+    assert r.status_code == 422 and "اختيار غير صالح" in r.text
+    assert c.get("/documents?project=²").status_code == 200
+    assert c.get("/master/project?edit=²").status_code == 200
+    r = c.post("/partners/save", {"id": "²", "name": "x"}, page="/partners")
+    assert r.status_code == 200 and "اختيار غير صالح" in r.text
+
+
+def test_failed_edit_keeps_the_old_attachment(ready):
+    c = ready
+    c.post("/documents/new/EXPENSE", {"date": "2026-10-02", "category": "food", "amount": "5",
+                                      "pay_source": "account", "money_account_id": c.ids["cash"]},
+           files={"attachment": ("old.png", io.BytesIO(PNG), "image/png")}, page="/documents/new/EXPENSE")
+    s, _ = ledger(c)
+    doc = s.scalar(select(Document).where(Document.doc_type == "EXPENSE"))
+    old_file = os.path.join(c.app.state.upload_dir, doc.attachment)
+    assert os.path.exists(old_file)
+    files_before = set(os.listdir(c.app.state.upload_dir))
+    r = c.post(f"/documents/{doc.id}/edit", {"date": "2026-10-02", "category": "food", "amount": "999999",
+                                             "pay_source": "account", "money_account_id": c.ids["cash"]},
+               files={"attachment": ("new.png", io.BytesIO(PNG), "image/png")}, page=f"/documents/{doc.id}/edit")
+    assert r.status_code == 422
+    assert os.path.exists(old_file)  # the receipt is not lost
+    assert set(os.listdir(c.app.state.upload_dir)) == files_before  # and the new upload was cleaned up
+    # a successful replacement removes the old file
+    r = c.post(f"/documents/{doc.id}/edit", {"date": "2026-10-02", "category": "food", "amount": "6",
+                                             "pay_source": "account", "money_account_id": c.ids["cash"]},
+               files={"attachment": ("new.png", io.BytesIO(PNG), "image/png")}, page=f"/documents/{doc.id}/edit")
+    assert r.status_code == 200 and not os.path.exists(old_file)
+
 
 def test_csv_export(ready):
     c = ready

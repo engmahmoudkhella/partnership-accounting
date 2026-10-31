@@ -49,7 +49,7 @@ from .models import (
     User,
     utcnow,
 )
-from .numbers import PPM_TOTAL, allocate, line_total
+from .numbers import PPM_TOTAL, allocate, line_total, round_half_up_div
 
 CASH, AR, FA, CAP, DIST, REV, GAIN, EXP, LOSS = (
     "1100", "1200", "1500", "3100", "3200", "4100", "4900", "5100", "5900",
@@ -59,11 +59,11 @@ PL_DEBIT = (EXP, LOSS)
 
 
 def share_display_ppm(weights: list[tuple[int, int]]) -> dict[int, int]:
-    """Each share rounded on its own (for display): 3:1:1:1 shows 50% / 16.6667% x3, not 16.6666%."""
+    """Each share rounded on its own, for display only: 3:1:1:1 shows 50% and 16.6667% three times
+    (which adds up to 100.0001% on screen). Calculations always use the exact weights."""
     total = sum(w for _, w in weights)
     if total <= 0:
         return {}
-    from .numbers import round_half_up_div
     return {pid: round_half_up_div(w * PPM_TOTAL, total) for pid, w in weights}
 
 
@@ -115,6 +115,8 @@ class Ledger:
     def __init__(self, session: Session, user: User | None, today: dt.date | None = None,
                  upload_dir: str | None = None):
         self.last_post_error: BusinessError | None = None
+        self.system = False  # True only for bootstrap/maintenance code acting without a user
+        self.files_to_remove: list[str] = []  # removed only after the transaction commits
         self.s = session
         self.user = user
         self.today = today or dt.date.today()
@@ -124,7 +126,9 @@ class Ledger:
 
     @property
     def role(self) -> str:
-        return self.user.role if self.user else "admin"
+        if self.user:
+            return self.user.role
+        return "admin" if self.system else "anonymous"
 
     def _require_role(self, *roles):
         if self.role not in roles:
@@ -208,7 +212,7 @@ class Ledger:
         return [(ln.partner_id, ln.weight) for ln in sorted(v.lines, key=lambda x: x.partner_id) if ln.weight > 0]
 
     def share_percent_at(self, d: dt.date) -> dict[int, int]:
-        """Display only: each partner's share in parts-per-million (rounded so they total 100%)."""
+        """Display only: each partner's share in parts-per-million, each rounded on its own."""
         return share_display_ppm(self.shares_at(d))
 
     def _last_share_dependent_date(self) -> dt.date | None:
@@ -790,17 +794,38 @@ class Ledger:
             if doc.fee:
                 L.append(Line(EXP, debit=doc.fee, category="fees"))
         elif t == "DISTRIBUTION":
-            parts = allocate(doc.amount, self.shares_at(doc.date))
+            parts = allocate(doc.amount, self.distribution_weights(doc.date, exclude_doc_id=doc.id),
+                             tie_offset=doc.number)
             for pid, amt in parts.items():
                 if amt:
                     L.append(Line(DIST, debit=amt, partner_id=pid))
             L.append(Line(CASH, credit=doc.amount, money_account_id=doc.money_account_id))
         return L
 
+    def distribution_weights(self, d: dt.date, exclude_doc_id: int | None = None) -> list[tuple[int, int]]:
+        """How a distribution on ``d`` is split: by each partner's profit not yet distributed.
+
+        With unchanged shares this equals the share ratio. After a change of shares it pays every
+        partner what he actually earned (profit earned under the old shares is paid by the old shares),
+        and it self-corrects any agora that rounding gave one partner earlier.
+        """
+        alloc = self.profit_allocation(end=d)
+        q = select(JournalLine.partner_id, func.sum(JournalLine.debit - JournalLine.credit)).where(
+            JournalLine.account == DIST, JournalLine.date <= d)
+        if exclude_doc_id:
+            q = q.where(JournalLine.document_id != exclude_doc_id)
+        paid = {pid: int(v) for pid, v in self.s.execute(q.group_by(JournalLine.partner_id)).all()}
+        pids = sorted(set(alloc) | set(paid))
+        weights = [(pid, max(0, alloc.get(pid, 0) - paid.get(pid, 0))) for pid in pids]
+        weights = [(pid, w) for pid, w in weights if w > 0]
+        if not weights:
+            raise BusinessError("err_distribution_exceeds_profit", date=d.isoformat(), excess=0)
+        return weights
+
     def _asset_cost(self, asset_id: int) -> int:
         asset = self.s.get(Asset, asset_id)
         src = self.s.get(Document, asset.source_document_id) if asset and asset.source_document_id else None
-        if src is None:
+        if src is None or src.status != "POSTED":
             return 0
         if src.doc_type == "OPENING":
             for o in src.opening_lines:
@@ -810,6 +835,8 @@ class Ledger:
         return src.amount
 
     def _rebuild_lines(self, doc: Document):
+        if doc.lines and self.is_locked(doc.date):
+            raise BusinessError("err_month_locked", month=month_of(doc.date))
         for ln in list(doc.lines):
             self.s.delete(ln)
         doc.lines.clear()
@@ -837,7 +864,7 @@ class Ledger:
         self.s.flush()
         if doc.doc_type != "CAPITAL_CALL":
             return
-        for pid, amt in allocate(doc.amount, self.shares_at(doc.date)).items():
+        for pid, amt in allocate(doc.amount, self.shares_at(doc.date), tie_offset=doc.number).items():
             doc.call_shares.append(CallShare(partner_id=pid, amount=amt))
         self.s.flush()
 
@@ -893,6 +920,15 @@ class Ledger:
             avail = self.distributable(d)
             if avail < 0:
                 raise BusinessError("err_distribution_exceeds_profit", date=d.isoformat(), excess=-avail)
+            # and no partner has received more than his own share of profit
+            alloc = self.profit_allocation(end=d)
+            for pid, paid in self.s.execute(
+                    select(JournalLine.partner_id, func.sum(JournalLine.debit - JournalLine.credit))
+                    .where(JournalLine.account == DIST, JournalLine.date <= d)
+                    .group_by(JournalLine.partner_id)).all():
+                if int(paid) > alloc.get(pid, 0):
+                    raise BusinessError("err_partner_overdistributed", date=d.isoformat(),
+                                        excess=int(paid) - alloc.get(pid, 0))
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -1084,6 +1120,21 @@ class Ledger:
         self._after_change(doc.date)
 
     def _remove_file(self, name: str):
+        """Schedule a file for removal; it is deleted by remove_scheduled_files() after commit."""
+        if name:
+            self.files_to_remove.append(name)
+
+    def discard_scheduled_files(self):
+        """Call after a rollback: nothing is removed."""
+        self.files_to_remove.clear()
+
+    def remove_scheduled_files(self):
+        """Call after a successful commit."""
+        names, self.files_to_remove = self.files_to_remove, []
+        for name in names:
+            self._delete_file_now(name)
+
+    def _delete_file_now(self, name: str):
         if name and self.upload_dir:
             path = os.path.join(self.upload_dir, os.path.basename(name))
             # never delete outside the upload directory
@@ -1268,6 +1319,15 @@ class Ledger:
             raise BusinessError("err_month_future")
         if self.s.scalar(select(MonthLock.id).where(MonthLock.month == month)):
             raise BusinessError("err_month_already_locked")
+        # months are locked in order, so a change in an open month can never alter a locked one
+        od = self.opening_date()
+        if od is None:
+            raise BusinessError("err_opening_required")
+        if month < month_of(od):
+            raise BusinessError("err_month_before_opening")
+        prev = self._previous_month(month)
+        if month > month_of(od) and not self.s.scalar(select(MonthLock.id).where(MonthLock.month == prev)):
+            raise BusinessError("err_lock_previous_first", month=prev)
         pending = self.s.scalar(select(func.count(Document.id)).where(
             Document.status == "PENDING", func.strftime("%Y-%m", Document.date) == month))
         if pending:
@@ -1284,6 +1344,9 @@ class Ledger:
         row = self.s.scalar(select(MonthLock).where(MonthLock.month == month))
         if row is None:
             raise BusinessError("err_month_not_locked")
+        later = self.s.scalar(select(MonthLock.month).where(MonthLock.month > month).order_by(MonthLock.month.desc()))
+        if later:
+            raise BusinessError("err_unlock_later_first", month=later)
         self.s.delete(row)
         self.s.flush()
         self.audit("unlock", "month", None, {"month": month}, None, note=reason)
@@ -1298,6 +1361,11 @@ class Ledger:
         self.s.add(MonthSignoff(month=month, user_id=self.user.id))
         self.s.flush()
         self.audit("signoff", "month", None, None, {"month": month})
+
+    @staticmethod
+    def _previous_month(month: str) -> str:
+        y, m = map(int, month.split("-"))
+        return f"{y - 1:04d}-12" if m == 1 else f"{y:04d}-{m - 1:02d}"
 
     @staticmethod
     def _valid_month(month: str):
@@ -1346,20 +1414,29 @@ class Ledger:
         return int(self.s.scalar(q))
 
     def profit_allocation(self, end: dt.date | None = None, start: dt.date | None = None) -> dict[int, int]:
-        """Each partner's share of net profit, by the shares in force on each day."""
-        q = select(JournalLine.date, func.sum(JournalLine.credit - JournalLine.debit)).where(
-            JournalLine.account.in_(PL_CREDIT + PL_DEBIT))
-        if end:
-            q = q.where(JournalLine.date <= end)
-        if start:
-            q = q.where(JournalLine.date >= start)
+        """Each partner's share of net profit, by the shares in force when it was earned.
+
+        Profit is totalled per share period and each period total is split once, so rounding never
+        builds up day after day: the parts always add up to net profit, and each partner is within
+        one agora of his exact share per period.
+        """
+        versions = self.share_versions()
         out: dict[int, int] = defaultdict(int)
-        for d, amount in self.s.execute(q.group_by(JournalLine.date).order_by(JournalLine.date)).all():
-            amount = int(amount)
-            if amount == 0:
-                continue
-            for pid, part in allocate(amount, self.shares_at(d)).items():
-                out[pid] += part
+        for i, v in enumerate(versions):
+            q = select(func.coalesce(func.sum(JournalLine.credit - JournalLine.debit), 0)).where(
+                JournalLine.account.in_(PL_CREDIT + PL_DEBIT), JournalLine.date >= v.effective_date)
+            if i + 1 < len(versions):
+                q = q.where(JournalLine.date < versions[i + 1].effective_date)
+            if end:
+                q = q.where(JournalLine.date <= end)
+            if start:
+                q = q.where(JournalLine.date >= start)
+            amount = int(self.s.scalar(q))
+            weights = [(ln.partner_id, ln.weight) for ln in sorted(v.lines, key=lambda x: x.partner_id)
+                       if ln.weight > 0]
+            if amount and weights:
+                for pid, part in allocate(amount, weights, tie_offset=i).items():
+                    out[pid] += part
         return dict(out)
 
     def partner_summary(self, as_of: dt.date | None = None) -> list[dict]:
@@ -1468,6 +1545,6 @@ class Ledger:
                 continue
             out.append({"project": p, "revenue": revenue, "gain": gain, "loss": loss, "expenses": expenses,
                         "categories": cats, "net": net, "produced": produced, "invoiced": invoiced,
-                        "cost_per_unit": (expenses * 1000 // produced) if produced else None,
-                        "profit_per_unit": (net * 1000 // invoiced) if invoiced else None})
+                        "cost_per_unit": round_half_up_div(expenses * 1000, produced) if produced else None,
+                        "profit_per_unit": round_half_up_div(net * 1000, invoiced) if invoiced else None})
         return out

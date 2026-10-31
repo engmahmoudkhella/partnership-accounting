@@ -265,8 +265,27 @@ def test_delete_removes_attachment_file(opened, tmp_path):
     doc = L.create_document("EXPENSE", D(2), {"amount": 200_000, "category": "meat", "money_account_id": w.cash.id},
                             attachment=("abc.jpg", "فاتورة.jpg"))
     L.delete_document(doc)
+    assert (up / "abc.jpg").exists()  # nothing is removed before the commit succeeds
     w.s.commit()
+    L.remove_scheduled_files()
     assert not (up / "abc.jpg").exists()
+
+
+def test_rolled_back_delete_keeps_attachment(opened, tmp_path):
+    w = opened
+    _approval_world(w)
+    up = tmp_path / "uploads"
+    up.mkdir()
+    (up / "keep.jpg").write_bytes(b"\xff\xd8\xff data")
+    L = Ledger(w.s, w.admin, today=TODAY, upload_dir=str(up))
+    doc = L.create_document("EXPENSE", D(2), {"amount": 200_000, "category": "meat", "money_account_id": w.cash.id},
+                            attachment=("keep.jpg", "x.jpg"))
+    w.s.commit()
+    L.delete_document(doc)
+    w.s.rollback()
+    L.discard_scheduled_files()
+    L.remove_scheduled_files()
+    assert (up / "keep.jpg").exists()
 
 
 def test_attachment_path_traversal_is_ignored(opened, tmp_path):
@@ -280,6 +299,8 @@ def test_attachment_path_traversal_is_ignored(opened, tmp_path):
     doc = L.create_document("EXPENSE", D(2), {"amount": 200_000, "category": "meat", "money_account_id": w.cash.id},
                             attachment=("../secret.txt", "x"))
     L.delete_document(doc)
+    w.s.commit()
+    L.remove_scheduled_files()
     assert victim.exists()
 
 
@@ -621,3 +642,112 @@ def test_balances_never_touched_by_failed_operations(opened):
     assert w.s.scalar(select(func.count(Document.id))) == n_docs
     assert w.s.scalar(select(func.count(AuditLog.id))) == n_audit
     assert w.L.balance(AR) == 0 and w.L.balance(CAP) == 1_000_000
+
+
+# ------------------------------------------------------------------ findings of the independent audit
+
+def test_distribution_after_share_change_pays_what_each_partner_earned(opened):
+    """Profit earned under 3:1:1:1 and paid after a change to 1:1:1:1 is still paid 3:1:1:1."""
+    w = opened
+    w.L.create_document("INVOICE", D(5), {"customer_id": w.org.id, "project_id": w.kitchen.id,
+                                          "quantity": 1000, "unit_price": 600_000})
+    w.L.create_document("RECEIPT", D(6), {"customer_id": w.org.id, "money_account_id": w.cash.id,
+                                          "amount": 600_000})
+    w.L.create_share_version(D(10), {w.contractor.id: 1, w.mahmoud.id: 1, w.momen.id: 1, w.ahmad.id: 1},
+                             mode="ratio")
+    d = w.L.create_document("DISTRIBUTION", D(12), {"money_account_id": w.cash.id, "amount": 600_000})
+    got = {ln.partner_id: ln.debit for ln in d.lines if ln.account == "3200"}
+    assert got == {w.contractor.id: 300_000, w.mahmoud.id: 100_000, w.momen.id: 100_000, w.ahmad.id: 100_000}
+    for r in w.L.partner_summary():
+        assert r["profit"] - r["distributions"] == 0
+
+
+def test_distribution_mixes_periods_correctly(opened):
+    w = opened
+    w.L.create_document("INVOICE", D(5), {"customer_id": w.org.id, "project_id": w.kitchen.id,
+                                          "quantity": 1000, "unit_price": 600_000})
+    w.L.create_share_version(D(10), {w.contractor.id: 1, w.mahmoud.id: 1, w.momen.id: 1, w.ahmad.id: 1},
+                             mode="ratio")
+    w.L.create_document("INVOICE", D(11), {"customer_id": w.org.id, "project_id": w.kitchen.id,
+                                           "quantity": 1000, "unit_price": 400_000})
+    w.L.create_document("RECEIPT", D(12), {"customer_id": w.org.id, "money_account_id": w.cash.id,
+                                           "amount": 1_000_000})
+    d = w.L.create_document("DISTRIBUTION", D(13), {"money_account_id": w.cash.id, "amount": 1_000_000})
+    got = {ln.partner_id: ln.debit for ln in d.lines if ln.account == "3200"}
+    assert got == {w.contractor.id: 300_000 + 100_000, w.mahmoud.id: 200_000, w.momen.id: 200_000,
+                   w.ahmad.id: 200_000}
+
+
+def test_rounding_does_not_build_up_over_many_days(opened):
+    w = opened
+    w.L.create_share_version(D(2), {w.mahmoud.id: 1, w.momen.id: 1, w.ahmad.id: 1}, mode="ratio")
+    for day in range(2, 31):
+        w.L.create_document("INVOICE", dt.date(2026, 10, day), {"customer_id": w.org.id,
+                                                                "project_id": w.kitchen.id,
+                                                                "quantity": 1000, "unit_price": 10_000})
+    alloc = w.L.profit_allocation()
+    # 29 x 100 ILS = 2,900 ILS split in three = 966.666… -> parts differ by at most one agora
+    parts = sorted(alloc[p.id] for p in (w.mahmoud, w.momen, w.ahmad))
+    assert parts[-1] - parts[0] <= 1 and sum(parts) == 290_000
+
+
+def test_repeated_distributions_do_not_favour_one_partner(opened):
+    w = opened
+    w.L.create_share_version(D(2), {w.mahmoud.id: 1, w.momen.id: 1, w.ahmad.id: 1}, mode="ratio")
+    w.L.create_document("INVOICE", D(3), {"customer_id": w.org.id, "project_id": w.kitchen.id,
+                                          "quantity": 1000, "unit_price": 10_000})
+    w.L.create_document("RECEIPT", D(3), {"customer_id": w.org.id, "money_account_id": w.cash.id,
+                                          "amount": 10_000})
+    for _ in range(50):
+        w.L.create_document("DISTRIBUTION", D(4), {"money_account_id": w.cash.id, "amount": 100})
+    rows = {r["partner"].id: r["distributions"] for r in w.L.partner_summary()}
+    got = sorted(rows[p.id] for p in (w.mahmoud, w.momen, w.ahmad))
+    assert sum(got) == 5000 and got[-1] - got[0] <= 1
+
+
+def test_months_lock_in_order_and_unlock_newest_first(opened):
+    w = opened
+    w.L.save_opening(dt.date(2026, 8, 1), {w.cash.id: 1_000_000}, {}, [], {w.contractor.id: 1_000_000})
+    with pytest.raises(BusinessError) as e:
+        w.L.lock_month("2026-09")
+    assert e.value.code == "err_lock_previous_first" and e.value.params["month"] == "2026-08"
+    assert code(w.L.lock_month, "2026-07") == "err_month_before_opening"
+    w.L.lock_month("2026-08")
+    w.L.lock_month("2026-09")
+    with pytest.raises(BusinessError) as e:
+        w.L.unlock_month("2026-08", "تصحيح")
+    assert e.value.code == "err_unlock_later_first" and e.value.params["month"] == "2026-09"
+    w.L.unlock_month("2026-09", "تصحيح")
+    w.L.unlock_month("2026-08", "تصحيح")
+
+
+def test_backdated_change_cannot_alter_a_locked_month(opened):
+    """With locks in order, any open month is after every locked month."""
+    w = opened
+    w.L.save_opening(dt.date(2026, 8, 1), {w.cash.id: 1_000_000}, {}, [], {w.contractor.id: 1_000_000})
+    w.L.create_document("EXPENSE", dt.date(2026, 9, 5), {"amount": 100, "category": "food",
+                                                         "money_account_id": w.cash.id})
+    w.L.lock_month("2026-08")
+    w.L.lock_month("2026-09")
+    closing_sep = w.L.balance(CASH, dt.date(2026, 9, 30))
+    assert code(w.L.create_document, "EXPENSE", dt.date(2026, 8, 20),
+                {"amount": 100, "category": "food", "money_account_id": w.cash.id}) == "err_month_locked"
+    w.L.create_document("EXPENSE", D(1), {"amount": 100, "category": "food", "money_account_id": w.cash.id})
+    assert w.L.balance(CASH, dt.date(2026, 9, 30)) == closing_sep
+
+
+def test_voided_asset_has_no_cost(opened):
+    w = opened
+    buy = w.L.create_document("ASSET_PURCHASE", D(3), {"amount": 100_000, "money_account_id": w.cash.id},
+                              asset_name="x")
+    assert w.L._asset_cost(buy.asset_id) == 100_000
+    w.L.void_document(buy, "خطأ")
+    assert w.L._asset_cost(buy.asset_id) == 0
+
+
+def test_anonymous_ledger_is_not_admin(opened):
+    w = opened
+    anon = Ledger(w.s, None, today=TODAY)
+    assert code(anon.lock_month, "2026-10") == "err_forbidden"
+    assert code(anon.create_document, "PRODUCTION", D(2), {"project_id": w.kitchen.id, "quantity": 1}) \
+        == "err_forbidden"

@@ -27,8 +27,7 @@ VALID_MONEY = [
     # plain ASCII
     ("0.01", 1), ("1", 100), ("17", 1700), ("17.5", 1750), ("17.50", 1750), ("2000", 200000),
     ("180000", 18000000), ("007", 700), ("0.5", 50), ("999999999.99", 99_999_999_999),
-    # extra decimal zeros are exact, therefore accepted
-    ("10.500", 1050), ("10.5000000", 1050), ("3.00", 300),
+    ("3.00", 300), ("3.5", 350),
     # thousands separators in correct groups
     ("1,000", 100000), ("1,234.56", 123456), ("12,345,678.90", 1234567890), ("180,000", 18000000),
     # Arabic-Indic digits
@@ -74,9 +73,12 @@ INVALID_MONEY = [
     ("1,0000", "err_number_format"), ("10,00,000", "err_number_format"), (",100", "err_number_format"),
     ("100,", "err_number_format"), ("1,,000", "err_number_format"), ("1 0 0", "err_number_format"),
     ("1,000,00", "err_number_format"),
-    # more decimals than agorot, with a non-zero digit
-    ("17.555", "err_number_too_many_decimals"), ("0.001", "err_number_too_many_decimals"),
-    ("١٧٫٥٥٥", "err_number_too_many_decimals"),
+    # a third decimal is never accepted for money: "1.500" is how many people write 1,500
+    ("1.500", "err_number_dot_thousands"), ("12.000", "err_number_dot_thousands"),
+    ("١٫٥٠٠", "err_number_dot_thousands"), ("17.555", "err_number_dot_thousands"),
+    ("10.500", "err_number_dot_thousands"), ("0.001", "err_number_dot_thousands"),
+    ("10.5000000", "err_number_too_many_decimals"), ("1,500.000", "err_number_too_many_decimals"),
+    ("1.5000", "err_number_too_many_decimals"),
     # currency we do not support
     ("$17", "err_number_format"), ("17 USD", "err_number_format"), ("17 دولار", "err_number_format"),
     # zero (not allowed for normal amounts)
@@ -104,8 +106,41 @@ def test_money_zero_allowed_when_requested():
 
 def test_too_many_decimals_reports_limit():
     with pytest.raises(NumberError) as e:
-        parse_money("1.234")
+        parse_money("1.2345")
     assert e.value.params == {"decimals": 2}
+
+
+def test_dot_thousands_suggests_the_intended_number():
+    with pytest.raises(NumberError) as e:
+        parse_money("1.500")
+    assert e.value.params == {"value": "1500"}
+    with pytest.raises(NumberError) as e:
+        parse_money("١٢٫٠٠٠")
+    assert e.value.params == {"value": "12000"}
+
+
+def test_quantity_still_accepts_three_decimals():
+    assert parse_quantity("1.500") == 1500  # 1.5 kg; the live preview shows "1.5" before saving
+
+
+@pytest.mark.parametrize("text", ["²", "١²", "1.5", "-1", "abc", "0x1", "1e3"])
+def test_parse_id_rejects_anything_but_digits(text):
+    from app.numbers import parse_id
+    with pytest.raises(NumberError):
+        parse_id(text)
+
+
+def test_parse_id():
+    from app.numbers import parse_id
+    assert parse_id("") is None and parse_id(None) is None
+    assert parse_id("١٢") == 12 and parse_id(" 7 ") == 7
+
+
+def test_allocate_tie_rotation_spreads_the_extra_agora():
+    w = [(1, 1), (2, 1), (3, 1)]
+    got = [allocate(100, w, tie_offset=k) for k in range(3)]
+    assert [g[1] for g in got] == [34, 33, 33] and [g[2] for g in got] == [33, 34, 33]
+    assert [g[3] for g in got] == [33, 33, 34]
 
 
 def test_non_string_input():

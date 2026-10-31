@@ -242,16 +242,20 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
                     kw["form"] = form
                 resp = await fn(ctx, **kw)
                 ctx.s.commit()
+                ctx.L.remove_scheduled_files()
                 return resp
             except Redirect as r:
                 ctx.s.rollback()
+                ctx.L.discard_scheduled_files()
                 return RedirectResponse(r.url, status_code=303)
             except N.NumberError as ne:
                 ctx.s.rollback()
+                ctx.L.discard_scheduled_files()
                 flash(request, "error", err_text(ctx, ne))
                 return RedirectResponse(request.headers.get("referer") or "/", status_code=303)
             except BusinessError as e:
                 ctx.s.rollback()
+                ctx.L.discard_scheduled_files()
                 if e.code == "err_forbidden":
                     return render(ctx, "message.html", status_code=403, title=ctx.t("err_forbidden"),
                                   message=ctx.t("err_forbidden"))
@@ -271,6 +275,13 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         wrapper.__signature__ = inspect.Signature(params)
         del wrapper.__wrapped__
         return wrapper
+
+    def safe_id(v):
+        """Query-string id: invalid or empty -> None (filters are simply ignored)."""
+        try:
+            return N.parse_id(v)
+        except N.NumberError:
+            return None
 
     def get_or_404(ctx, model, obj_id):
         obj = ctx.s.get(model, obj_id)
@@ -310,6 +321,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         if ctx.s.scalar(select(func.count(User.id))):
             raise Redirect("/login")
         ctx.L.user = None  # bootstrap: acts as system
+        ctx.L.system = True
         u = ctx.L.save_user(None, username=form.get("username", ""), full_name=form.get("full_name", ""),
                             role="admin", partner_id=None, password=form.get("password", ""),
                             lang=ctx.lang if ctx.lang in ("ar", "en") else "ar")
@@ -325,6 +337,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
 
     def raise_commit_redirect(ctx, url):
         ctx.s.commit()
+        ctx.L.remove_scheduled_files()
         raise Redirect(url)
 
     @app.get("/login", response_class=HTMLResponse)
@@ -342,6 +355,8 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         if not nxt.startswith("/") or nxt.startswith("//"):
             nxt = "/"
         now = time.time()
+        if len(failed_logins) > 10_000:
+            failed_logins.clear()
         key = username
         attempts = [x for x in failed_logins[key] if now - x < 300]
         failed_logins[key] = attempts
@@ -519,10 +534,10 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             stmt = stmt.where(Document.doc_type == q["type"])
         if q.get("status") in ("PENDING", "POSTED", "REJECTED", "VOID"):
             stmt = stmt.where(Document.status == q["status"])
-        if q.get("project", "").isdigit():
-            stmt = stmt.where(Document.project_id == int(q["project"]))
-        if q.get("partner", "").isdigit():
-            pid = int(q["partner"])
+        if safe_id(q.get("project")):
+            stmt = stmt.where(Document.project_id == safe_id(q["project"]))
+        if safe_id(q.get("partner")):
+            pid = safe_id(q["partner"])
             stmt = stmt.where(or_(Document.partner_id == pid, Document.partner2_id == pid,
                                   Document.paid_by_partner_id == pid))
         d1, d2 = opt_date(q.get("from")), opt_date(q.get("to"))
@@ -560,8 +575,8 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             raise BusinessError("err_not_found")
         ctx.L._can_create(doc_type)
         values = {"date": today_fn().isoformat(), "pay_source": "account"}
-        if ctx.request.query_params.get("project", "").isdigit():
-            values["project_id"] = ctx.request.query_params["project"]
+        if safe_id(ctx.request.query_params.get("project")):
+            values["project_id"] = str(safe_id(ctx.request.query_params["project"]))
         return render(ctx, "doc_form.html", doc_type=doc_type, doc=None, values=values, errors={},
                       fields=FORM_FIELDS[doc_type], opts=form_options(ctx), attach=doc_type in ATTACHMENT_TYPES,
                       extra=_form_extra(ctx, doc_type))
@@ -571,7 +586,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         if doc_type == "DISTRIBUTION" and ctx.L.opening_doc():
             extra["distributable"] = ctx.L.distributable(today_fn())
             try:
-                extra["shares"] = ctx.L.shares_at(today_fn())
+                extra["shares"] = ctx.L.distribution_weights(today_fn())
             except BusinessError:
                 extra["shares"] = []
             extra["share_names"] = {p.id: p.name for p in ctx.s.scalars(select(Partner))}
@@ -598,8 +613,10 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             doc = ctx.L.create_document(doc_type, extras["date"], data, asset_name=extras.get("asset_name"),
                                         attachment=att)
             ctx.s.commit()
+            ctx.L.remove_scheduled_files()
         except BusinessError as e:
             ctx.s.rollback()
+            ctx.L.discard_scheduled_files()
             if ctx.new_upload:
                 os.remove(os.path.join(upload_dir, ctx.new_upload))
             return render(ctx, "doc_form.html", status_code=422, doc_type=doc_type, doc=None, values=values,
@@ -656,8 +673,10 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             ctx.L.update_document(doc, extras["date"], data, asset_name=extras.get("asset_name"), attachment=att,
                                   remove_attachment=form.get("remove_attachment") == "1")
             ctx.s.commit()
+            ctx.L.remove_scheduled_files()
         except BusinessError as e:
             ctx.s.rollback()
+            ctx.L.discard_scheduled_files()
             if ctx.new_upload:
                 os.remove(os.path.join(upload_dir, ctx.new_upload))
             doc = ctx.s.get(Document, doc_id)
@@ -792,8 +811,8 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
                     amt = N.parse_money(raw)
                     if not name:
                         raise N.NumberError("err_name_required")
-                    assets.append({"id": int(aid) if aid.isdigit() else None, "name": name, "amount": amt,
-                                   "project_id": int(proj) if proj.isdigit() else None})
+                    assets.append({"id": N.parse_id(aid), "name": name, "amount": amt,
+                                   "project_id": N.parse_id(proj)})
                 except N.NumberError as e:
                     errors[f"asset_{n}"] = err_text(ctx, e)
             n += 1
@@ -801,6 +820,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             try:
                 ctx.L.save_opening(date, money, customers, assets, partners)
                 ctx.s.commit()
+                ctx.L.remove_scheduled_files()
                 flash(ctx.request, "ok", ctx.t("msg_saved"))
                 raise Redirect("/opening")
             except BusinessError as e:
@@ -829,7 +849,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     async def partner_save(ctx: Ctx, form):
         require(ctx, "admin")
         pid = form.get("id") or ""
-        p = get_or_404(ctx, Partner, int(pid)) if pid.isdigit() else None
+        p = get_or_404(ctx, Partner, N.parse_id(pid)) if N.parse_id(pid) else None
         ctx.L.save_partner(p, form.get("name", ""), form.get("id_number", ""), form.get("phone", ""))
         flash(ctx.request, "ok", ctx.t("msg_saved"))
         raise_commit_redirect(ctx, "/partners")
@@ -891,8 +911,8 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         if entity == "customer":
             bal = {i.id: ctx.L.balance("1200", customer_id=i.id) for i in items}
         edit = None
-        if ctx.request.query_params.get("edit", "").isdigit():
-            edit = ctx.s.get(model, int(ctx.request.query_params["edit"]))
+        if safe_id(ctx.request.query_params.get("edit")):
+            edit = ctx.s.get(model, safe_id(ctx.request.query_params["edit"]))
         return render(ctx, "master.html", entity=entity, items=items, refs=refs, bal=bal, edit=edit)
 
     @app.post("/master/{entity}/save")
@@ -902,7 +922,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         if entity not in MASTER:
             raise BusinessError("err_not_found")
         oid = form.get("id") or ""
-        obj = get_or_404(ctx, MASTER[entity], int(oid)) if oid.isdigit() else None
+        obj = get_or_404(ctx, MASTER[entity], N.parse_id(oid)) if N.parse_id(oid) else None
         fields = {"name": form.get("name", "")}
         if entity == "money_account":
             fields.update(kind=form.get("kind", ""), holder=form.get("holder", ""))
@@ -940,8 +960,8 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         require(ctx, "admin")
         users = list(ctx.s.scalars(select(User).order_by(User.id)))
         edit = None
-        if ctx.request.query_params.get("edit", "").isdigit():
-            edit = ctx.s.get(User, int(ctx.request.query_params["edit"]))
+        if safe_id(ctx.request.query_params.get("edit")):
+            edit = ctx.s.get(User, safe_id(ctx.request.query_params["edit"]))
         return render(ctx, "users.html", users=users, edit=edit, roles=ROLES,
                       partners=list(ctx.s.scalars(select(Partner).order_by(Partner.id))))
 
@@ -950,12 +970,12 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     async def users_save(ctx: Ctx, form):
         require(ctx, "admin")
         uid = form.get("id") or ""
-        u = get_or_404(ctx, User, int(uid)) if uid.isdigit() else None
+        u = get_or_404(ctx, User, N.parse_id(uid)) if N.parse_id(uid) else None
         pid = form.get("partner_id") or ""
         if form.get("password") and form.get("password") != form.get("password2"):
             raise BusinessError("err_password_mismatch")
         ctx.L.save_user(u, username=form.get("username", ""), full_name=form.get("full_name", ""),
-                        role=form.get("role", ""), partner_id=int(pid) if pid.isdigit() else None,
+                        role=form.get("role", ""), partner_id=N.parse_id(pid),
                         password=form.get("password") or None, lang=form.get("lang", "ar"),
                         digits=form.get("digits", "latn"))
         flash(ctx.request, "ok", ctx.t("msg_saved"))

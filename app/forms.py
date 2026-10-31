@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 
-from .numbers import NumberError, normalize_digits, parse_money, parse_quantity
+from .numbers import NumberError, normalize_digits, parse_id, parse_money, parse_quantity
 
 # (field, kind, required)
 # kinds: money, money0 (zero allowed), qty, partner, money_account, customer, project, asset, call,
@@ -71,12 +71,7 @@ def parse_date(text: str) -> dt.date:
 
 
 def _int_or_none(v):
-    v = normalize_digits((v or "").strip())
-    if v == "":
-        return None
-    if not v.isdigit():
-        raise NumberError("err_invalid_choice")
-    return int(v)
+    return parse_id(v)
 
 
 def parse_document_form(doc_type: str, form) -> tuple[dict, dict, dict]:

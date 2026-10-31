@@ -8,7 +8,7 @@ rolled back — the following must hold:
 * assets == partners' equity (balance sheet)
 * no money account, customer balance, partner capital or asset is negative on any day
 * partners' profit shares add up exactly to net profit
-* distributions never exceed collected profit
+* distributions never exceed collected profit, and no partner receives more than his own profit
 * voiding a document returns all balances exactly to what they were before it was created
 """
 
@@ -65,6 +65,8 @@ def check(L: Ledger):
     for acc in (CASH, AR, FA):
         assert L.balance(acc) >= 0
     assert L.balance(CAP) >= 0
+    for r in L.partner_summary():
+        assert r["distributions"] <= r["profit"] or r["distributions"] == 0, r
 
 
 def state(L: Ledger):
