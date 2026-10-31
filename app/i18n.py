@@ -53,6 +53,8 @@ T: dict[str, tuple[str, str]] = {
     "nav_audit": ("سجل الرقابة", "Audit log"),
     "nav_users": ("المستخدمون", "Users"),
     "nav_settings": ("الإعدادات", "Settings"),
+    "err_void_invoice_paid": ("لا يمكن إلغاء هذه المطالبة لأن مبلغها (أو جزءاً منه) استُلم. ألغِ دفعة الاستلام أولاً، ثم ألغِ المطالبة.",
+                              "This invoice has been paid (fully or partly). Void the receipt first, then the invoice."),
     "nav_g_daily": ("العمل اليومي", "Daily work"),
     "nav_g_setup": ("البيانات الأساسية", "Setup"),
     "nav_g_control": ("التقارير والرقابة", "Reports & control"),

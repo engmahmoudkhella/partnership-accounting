@@ -128,10 +128,16 @@ def test_cannot_void_invoice_already_paid(opened):
     w = opened
     inv = w.L.create_document("INVOICE", D(5), {"customer_id": w.org.id, "project_id": w.kitchen.id,
                                                 "quantity": 1000, "unit_price": 100_000})
-    w.L.create_document("RECEIPT", D(6), {"customer_id": w.org.id, "money_account_id": w.cash.id,
-                                          "amount": 100_000})
+    rec = w.L.create_document("RECEIPT", D(6), {"customer_id": w.org.id, "money_account_id": w.cash.id,
+                                                "amount": 100_000})
     w.s.commit()
-    assert code(w.L.void_document, inv, "خطأ") == "err_receivable_negative"
+    assert code(w.L.void_document, inv, "خطأ") == "err_void_invoice_paid"
+    w.s.rollback()
+    # the advice in the message works: void the receipt, then the invoice
+    w.L.void_document(rec, "خطأ في التسجيل")
+    w.L.void_document(inv, "خطأ في التسجيل")
+    w.s.commit()
+    assert w.s.get(Document, inv.id).status == "VOID"
 
 
 def test_cannot_void_receipt_when_its_profit_was_distributed(opened):

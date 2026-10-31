@@ -1091,8 +1091,14 @@ class Ledger:
         doc.void_reason = reason
         doc.voided_by = self.user.id if self.user else None
         doc.voided_at = utcnow()
-        self._rebuild_lines(doc)
-        self.check_invariants()
+        try:
+            self._rebuild_lines(doc)
+            self.check_invariants()
+        except BusinessError as e:
+            if doc.doc_type == "INVOICE" and e.code == "err_receivable_negative":
+                # the generic message ("record the invoice first") is misleading here
+                raise BusinessError("err_void_invoice_paid") from e
+            raise
         self.audit("void", "document", doc.id, before, self.doc_snapshot(doc), note=reason)
         self._after_change(doc.date)
 
