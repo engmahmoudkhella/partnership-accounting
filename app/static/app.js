@@ -1,6 +1,19 @@
 (function () {
   "use strict";
   var AR = document.documentElement.lang === "ar";
+  // side menu (mobile drawer)
+  var menuBtn = document.querySelector(".menu-btn");
+  function setNav(open) {
+    document.body.classList.toggle("nav-open", open);
+    if (menuBtn) menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+  if (menuBtn) menuBtn.addEventListener("click", function () { setNav(!document.body.classList.contains("nav-open")); });
+  document.querySelectorAll("[data-close-nav]").forEach(function (el) { el.addEventListener("click", function () { setNav(false); }); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") setNav(false); });
+  // highlight the current tab in sub-navigation bars
+  document.querySelectorAll(".subnav a").forEach(function (a) {
+    if (a.getAttribute("href") === location.pathname) a.setAttribute("aria-current", "page");
+  });
   var DIGITS = {"٠":"0","١":"1","٢":"2","٣":"3","٤":"4","٥":"5","٦":"6","٧":"7","٨":"8","٩":"9",
                 "۰":"0","۱":"1","۲":"2","۳":"3","۴":"4","۵":"5","۶":"6","۷":"7","۸":"8","۹":"9"};
   // Mirrors app/numbers.py for an instant preview. The server always re-checks.

@@ -10,20 +10,20 @@
 </div>
 {% endif %}
 {% if has_opening and user.role in ('admin','accountant','partner') %}
-<div class="actions">
+<section class="quick" aria-label="{{ t('quick_new') }}"><div class="quick-title">{{ t('quick_new') }}</div><div class="actions">
 {% if user.role in ('admin','accountant') %}
-{% for dt in ['CONTRIBUTION','EXPENSE','INVOICE','RECEIPT','PRODUCTION','TRANSFER','ASSET_PURCHASE','CAPITAL_CALL','DISTRIBUTION'] %}<a class="btn" href="/documents/new/{{ dt }}">+ {{ t('doc_' + dt) }}</a>{% endfor %}
+{% for dt in ['CONTRIBUTION','EXPENSE','INVOICE','RECEIPT','PRODUCTION','TRANSFER','ASSET_PURCHASE','CAPITAL_CALL','DISTRIBUTION'] %}<a class="btn chip" href="/documents/new/{{ dt }}">+ {{ t('doc_' + dt) }}</a>{% endfor %}
 {% else %}
-<a class="btn" href="/documents/new/EXPENSE">+ {{ t('doc_EXPENSE') }}</a><a class="btn" href="/documents/new/PRODUCTION">+ {{ t('doc_PRODUCTION') }}</a>
+<a class="btn chip" href="/documents/new/EXPENSE">+ {{ t('doc_EXPENSE') }}</a><a class="btn chip" href="/documents/new/PRODUCTION">+ {{ t('doc_PRODUCTION') }}</a>
 {% endif %}
-</div>
+</div></section>
 {% endif %}
 <div class="tiles">
-<div class="tile"><div class="label">{{ t('tile_cash') }}</div><div class="value">{{ m(tb.cash) }}</div></div>
-<div class="tile"><div class="label">{{ t('tile_receivable') }}</div><div class="value">{{ m(tb.receivable) }}</div></div>
-<div class="tile"><div class="label">{{ t('tile_assets') }}</div><div class="value">{{ m(tb.fixed_assets) }}</div></div>
-<div class="tile"><div class="label">{{ t('tile_profit') }}</div><div class="value {{ 'neg' if tb.profit < 0 }}">{{ m(tb.profit) }}</div></div>
-<div class="tile"><div class="label">{{ t('tile_distributable') }}</div><div class="value">{{ m(distributable) }}</div></div>
+<div class="tile t-cash"><div class="label">{{ t('tile_cash') }}</div><div class="value">{{ m(tb.cash) }}</div></div>
+<div class="tile t-recv"><div class="label">{{ t('tile_receivable') }}</div><div class="value">{{ m(tb.receivable) }}</div></div>
+<div class="tile t-assets"><div class="label">{{ t('tile_assets') }}</div><div class="value">{{ m(tb.fixed_assets) }}</div></div>
+<div class="tile t-profit"><div class="label">{{ t('tile_profit') }}</div><div class="value {{ 'neg' if tb.profit < 0 }}">{{ m(tb.profit) }}</div></div>
+<div class="tile t-dist"><div class="label">{{ t('tile_distributable') }}</div><div class="value">{{ m(distributable) }}</div></div>
 </div>
 {% if not (tb.balanced and tb.sheet_ok) %}<div class="flash error" role="alert">{{ t('err_books_not_balanced') }}</div>{% endif %}
 <div class="grid2">

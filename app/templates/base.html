@@ -3,44 +3,93 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b2a3f">
 <title>{% block title %}{{ t('app_name') }}{% endblock %} · {{ company or t('app_name') }}</title>
 <link rel="stylesheet" href="/static/app.css">
 </head>
-<body>
+{%- set ICONS = {
+  'home': 'M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
+  'list': 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
+  'check': 'M9 12l2 2 4-4M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z',
+  'flag': 'M4 21V4h11l-1 4h6v9H9l1-4H4',
+  'users': 'M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 20v-2a4 4 0 0 0-3-3.9M16 2.1a4 4 0 0 1 0 7.8',
+  'folder': 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
+  'wallet': 'M3 7h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h12v3M17 14h.01',
+  'building': 'M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16M16 9h3a2 2 0 0 1 2 2v10M2 21h20M8 7h4M8 11h4M8 15h4',
+  'box': 'M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8M12 13v8',
+  'lock': 'M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4',
+  'chart': 'M3 3v18h18M7 15l4-4 3 3 5-6',
+  'eye': 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  'user': 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
+  'gear': 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
+  'globe': 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18',
+  'out': 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9'
+} -%}
+{%- macro icon(name) -%}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ICONS[name] }}"/></svg>{%- endmacro -%}
+{%- set path = request.url.path -%}
+{%- set awaiting = request.query_params.get('awaiting') -%}
+{%- macro nav(href, key, ic, prefix=none, extra='') -%}
+{%- set p = prefix or href -%}
+{%- set on = (path == '/' if href == '/' else (href == '/documents?awaiting=me' and awaiting) or (href == '/documents' and path.startswith('/documents') and not awaiting) or (href not in ('/documents', '/documents?awaiting=me') and path.startswith(p))) -%}
+<a href="{{ href }}"{% if on %} aria-current="page" class="on"{% endif %} {{ extra|safe }}>{{ icon(ic) }}<span>{{ t(key) }}</span>{{ caller() if caller is defined else '' }}</a>
+{%- endmacro -%}
+<body class="{{ 'app' if user else 'guest' }}">
 {% if user %}
-<header class="top">
-  <a class="brand" href="/">{{ company or t('app_name') }}</a>
-  <button class="menu-btn" type="button" aria-label="{{ t('menu') }}" onclick="document.body.classList.toggle('nav-open')">☰</button>
+<aside class="side" id="side" aria-label="{{ t('menu') }}">
+  <div class="side-head">
+    <a class="brand" href="/"><span class="logo" aria-hidden="true">{{ (company or t('app_name'))[:1] }}</span><span>{{ company or t('app_name') }}</span></a>
+    <button class="side-close" type="button" aria-label="{{ t('close') }}" data-close-nav>✕</button>
+  </div>
   <nav class="nav">
-    <a href="/">{{ t('nav_dashboard') }}</a>
-    <a href="/documents">{{ t('nav_documents') }}</a>
-    <a href="/documents?awaiting=me" data-testid="nav-approvals">{{ t('nav_approvals') }}{% if pending_count %} <span class="badge">{{ num(pending_count) }}</span>{% endif %}</a>
-    <a href="/opening">{{ t('nav_opening') }}</a>
-    <a href="/partners">{{ t('nav_partners') }}</a>
-    <a href="/master/project">{{ t('nav_projects') }}</a>
-    <a href="/master/money_account">{{ t('nav_accounts') }}</a>
-    <a href="/master/customer">{{ t('nav_customers') }}</a>
-    <a href="/assets">{{ t('nav_assets') }}</a>
-    <a href="/months">{{ t('nav_months') }}</a>
-    <span class="dropdown"><a href="/reports/partners">{{ t('nav_reports') }}</a></span>
-    <a href="/audit">{{ t('nav_audit') }}</a>
-    {% if user.role == 'admin' %}<a href="/users">{{ t('nav_users') }}</a><a href="/settings">{{ t('nav_settings') }}</a>{% endif %}
+    <div class="nav-group">{{ t('nav_g_daily') }}</div>
+    {{ nav('/', 'nav_dashboard', 'home') }}
+    {{ nav('/documents', 'nav_documents', 'list') }}
+    {% call nav('/documents?awaiting=me', 'nav_approvals', 'check', extra='data-testid="nav-approvals"') %}{% if pending_count %}<span class="badge">{{ num(pending_count) }}</span>{% endif %}{% endcall %}
+    <div class="nav-group">{{ t('nav_g_setup') }}</div>
+    {{ nav('/opening', 'nav_opening', 'flag') }}
+    {{ nav('/partners', 'nav_partners', 'users') }}
+    {{ nav('/master/project', 'nav_projects', 'folder') }}
+    {{ nav('/master/money_account', 'nav_accounts', 'wallet') }}
+    {{ nav('/master/customer', 'nav_customers', 'building') }}
+    {{ nav('/assets', 'nav_assets', 'box') }}
+    <div class="nav-group">{{ t('nav_g_control') }}</div>
+    {{ nav('/reports/partners', 'nav_reports', 'chart', prefix='/reports') }}
+    {{ nav('/months', 'nav_months', 'lock') }}
+    {{ nav('/audit', 'nav_audit', 'eye') }}
+    {% if user.role == 'admin' %}
+    <div class="nav-group">{{ t('nav_g_admin') }}</div>
+    {{ nav('/users', 'nav_users', 'user') }}
+    {{ nav('/settings', 'nav_settings', 'gear') }}
+    {% endif %}
   </nav>
+</aside>
+<div class="scrim" data-close-nav></div>
+<div class="shell">
+<header class="top">
+  <button class="menu-btn" type="button" aria-label="{{ t('menu') }}" aria-controls="side" aria-expanded="false">☰</button>
+  <a class="brand-m" href="/">{{ company or t('app_name') }}</a>
   <div class="who">
-    <a href="/lang/{{ 'en' if lang == 'ar' else 'ar' }}" data-testid="lang-switch">{{ 'English' if lang == 'ar' else 'العربية' }}</a>
-    <a href="/account">{{ user.full_name }} · {{ t('role_' + user.role) }}</a>
-    <form method="post" action="/logout" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">{{ t('logout') }}</button></form>
+    <a class="pill" href="/lang/{{ 'en' if lang == 'ar' else 'ar' }}" data-testid="lang-switch">{{ icon('globe') }}<span>{{ 'English' if lang == 'ar' else 'العربية' }}</span></a>
+    <a class="me" href="/account"><span class="avatar" aria-hidden="true">{{ user.full_name[:1] }}</span><span class="me-txt"><b>{{ user.full_name }}</b><small>{{ t('role_' + user.role) }}</small></span></a>
+    <form method="post" action="/logout" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link" title="{{ t('logout') }}">{{ icon('out') }}<span class="lo-txt">{{ t('logout') }}</span></button></form>
   </div>
 </header>
-{% else %}
-<header class="top"><span class="brand">{{ company or t('app_name') }}</span>
-  <div class="who"><a href="/lang/{{ 'en' if lang == 'ar' else 'ar' }}" data-testid="lang-switch">{{ 'English' if lang == 'ar' else 'العربية' }}</a></div>
-</header>
-{% endif %}
 <main>
 {% for kind, msg in flashes %}<div class="flash {{ kind }}" role="{{ 'alert' if kind == 'error' else 'status' }}">{{ msg }}</div>{% endfor %}
 {% block content %}{% endblock %}
 </main>
+</div>
+{% else %}
+<div class="guest-wrap">
+<header class="top guest-top"><span class="brand"><span class="logo" aria-hidden="true">{{ (company or t('app_name'))[:1] }}</span><span>{{ company or t('app_name') }}</span></span>
+  <div class="who"><a class="pill" href="/lang/{{ 'en' if lang == 'ar' else 'ar' }}" data-testid="lang-switch">{{ icon('globe') }}<span>{{ 'English' if lang == 'ar' else 'العربية' }}</span></a></div>
+</header>
+<main>
+{% for kind, msg in flashes %}<div class="flash {{ kind }}" role="{{ 'alert' if kind == 'error' else 'status' }}">{{ msg }}</div>{% endfor %}
+{% block content_guest %}{{ self.content() }}{% endblock %}
+</main>
+</div>
+{% endif %}
 <script src="/static/app.js"></script>
 </body>
 </html>

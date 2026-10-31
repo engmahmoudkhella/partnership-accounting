@@ -127,6 +127,16 @@ def test_setup_password_mismatch(app):
     assert s.scalar(select(User)) is None
 
 
+def test_setup_error_keeps_typed_values(app):
+    c = Client(app)
+    r = c.post("/setup", {"username": "x", "full_name": "محمود خله", "company_name": "شراكة المطبخ",
+                          "password": "password123", "password2": "password123"}, page="/setup")
+    assert r.status_code == 422
+    assert 'value="محمود خله"' in r.text and 'value="شراكة المطبخ"' in r.text
+    assert "password123" not in r.text
+    assert c.db().scalar(select(User)) is None
+
+
 def test_login_logout_and_rate_limit(client):
     c = client
     c.c.cookies.clear()

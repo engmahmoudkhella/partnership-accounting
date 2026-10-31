@@ -322,11 +322,17 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             raise Redirect("/login")
         ctx.L.user = None  # bootstrap: acts as system
         ctx.L.system = True
-        u = ctx.L.save_user(None, username=form.get("username", ""), full_name=form.get("full_name", ""),
-                            role="admin", partner_id=None, password=form.get("password", ""),
-                            lang=ctx.lang if ctx.lang in ("ar", "en") else "ar")
-        if form.get("password") != form.get("password2"):
-            raise BusinessError("err_password_mismatch")
+        try:
+            u = ctx.L.save_user(None, username=form.get("username", ""), full_name=form.get("full_name", ""),
+                                role="admin", partner_id=None, password=form.get("password", ""),
+                                lang=ctx.lang if ctx.lang in ("ar", "en") else "ar")
+            if form.get("password") != form.get("password2"):
+                raise BusinessError("err_password_mismatch")
+        except BusinessError as e:
+            # show the error on the same page and keep what was typed (except passwords)
+            ctx.s.rollback()
+            values = {k: form.get(k, "") for k in ("company_name", "full_name", "username")}
+            return render(ctx, "setup.html", status_code=422, errors={"_": err_text(ctx, e)}, values=values)
         company = (form.get("company_name") or "").strip()
         if company:
             ctx.L.set_setting("company_name", company)
