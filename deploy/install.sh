@@ -46,7 +46,7 @@ fi
 say "Installing system packages (python, nginx, openssl)"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
-apt-get install -y -q python3 python3-venv python3-pip nginx openssl ca-certificates >/dev/null
+apt-get install -y -q python3 python3-venv python3-pip nginx openssl ca-certificates curl >/dev/null
 if [ -n "$DOMAIN" ]; then apt-get install -y -q certbot python3-certbot-nginx >/dev/null; fi
 PYV=$(python3 -c 'import sys; print("%d%02d" % sys.version_info[:2])')
 [ "$PYV" -ge 310 ] || die "Python 3.10+ is required (found $(python3 --version))"
