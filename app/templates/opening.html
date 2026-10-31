@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf_field, m with context %}
+{% block title %}{{ t('nav_opening') }}{% endblock %}
+{% block content %}
+<h1>{{ t('nav_opening') }}</h1>
+<p class="muted">{{ t('help_opening') }}</p>
+{% if locked %}<div class="note">🔒 {{ t('err_opening_locked') }}</div>{% endif %}
+{% if errors.get('_') %}<div class="flash error" role="alert" data-testid="form-error">{{ errors['_'] }}</div>{% endif %}
+{% if errors and not errors.get('_') %}<div class="flash error" role="alert" data-testid="form-error">{{ t('err_fix_fields') }}</div>{% endif %}
+<form method="post" class="card form" id="opening-form" novalidate data-testid="opening-form">{{ csrf_field() }}
+<fieldset {{ 'disabled' if (not can_edit or locked) }}>
+<label>{{ t('f_opening_date') }}<input type="date" name="date" value="{{ values.get('date','') }}" data-testid="f-date"></label>
+{% if errors.get('date') %}<div class="field-error">{{ errors.date }}</div>{% endif %}
+<h2>{{ t('opening_assets_side') }}</h2>
+<h3>{{ t('nav_accounts') }}</h3>
+{% for a in accounts %}<label>{{ a.name }}<input class="numin ob-debit" type="text" inputmode="decimal" dir="ltr" name="m_{{ a.id }}" value="{{ values.get('m_%d' % a.id, '') }}" data-kind="money0" data-testid="m-{{ a.id }}"><small class="preview" data-for="m_{{ a.id }}"></small></label>
+{% if errors.get('m_%d' % a.id) %}<div class="field-error">{{ errors['m_%d' % a.id] }}</div>{% endif %}{% else %}<p class="muted">{{ t('empty') }} — <a href="/master/money_account">{{ t('nav_accounts') }}</a></p>{% endfor %}
+<h3>{{ t('opening_receivables') }}</h3>
+{% for c in customers %}<label>{{ c.name }}<input class="numin ob-debit" type="text" inputmode="decimal" dir="ltr" name="c_{{ c.id }}" value="{{ values.get('c_%d' % c.id, '') }}" data-kind="money0" data-testid="c-{{ c.id }}"><small class="preview" data-for="c_{{ c.id }}"></small></label>
+{% if errors.get('c_%d' % c.id) %}<div class="field-error">{{ errors['c_%d' % c.id] }}</div>{% endif %}{% endfor %}
+<h3>{{ t('nav_assets') }}</h3>
+<table id="asset-rows"><thead><tr><th>{{ t('f_asset_name') }}</th><th>{{ t('f_project_id') }}</th><th>{{ t('f_amount') }}</th></tr></thead><tbody>
+{% set rows = assets + [{'id':'','name':'','amount':'','project_id':''}] %}
+{% for a in rows %}<tr>
+<td><input type="hidden" name="asset_id_{{ loop.index0 }}" value="{{ a.id }}"><input name="asset_name_{{ loop.index0 }}" value="{{ a.name }}" data-testid="asset-name-{{ loop.index0 }}"></td>
+<td><select name="asset_project_{{ loop.index0 }}"><option value="">—</option>{% for p in projects %}<option value="{{ p.id }}" {{ 'selected' if a.project_id == p.id|string }}>{{ p.name }}</option>{% endfor %}</select></td>
+<td><input class="numin ob-debit" type="text" inputmode="decimal" dir="ltr" name="asset_amount_{{ loop.index0 }}" value="{{ a.amount }}" data-kind="money" data-testid="asset-amount-{{ loop.index0 }}">{% if errors.get('asset_%d' % loop.index0) %}<div class="field-error">{{ errors['asset_%d' % loop.index0] }}</div>{% endif %}</td>
+</tr>{% endfor %}</tbody></table>
+<button type="button" class="btn" id="add-asset-row">+ {{ t('add_row') }}</button>
+<h2>{{ t('opening_capital_side') }}</h2>
+{% for p in partners %}<label>{{ p.name }}<input class="numin ob-credit" type="text" inputmode="decimal" dir="ltr" name="p_{{ p.id }}" value="{{ values.get('p_%d' % p.id, '') }}" data-kind="money0" data-testid="p-{{ p.id }}"><small class="preview" data-for="p_{{ p.id }}"></small></label>
+{% if errors.get('p_%d' % p.id) %}<div class="field-error">{{ errors['p_%d' % p.id] }}</div>{% endif %}{% endfor %}
+<div class="note" id="ob-totals"><span>{{ t('opening_total_assets') }}: <b class="num" dir="ltr" id="ob-d">0.00</b></span> · <span>{{ t('opening_total_capital') }}: <b class="num" dir="ltr" id="ob-c">0.00</b></span> · <span>{{ t('opening_diff') }}: <b class="num" dir="ltr" id="ob-diff">0.00</b></span></div>
+{% if can_edit and not locked %}<button class="primary" data-testid="save">{{ t('btn_save') }}</button>{% endif %}
+</fieldset>
+</form>
+{% if doc %}<p><a href="/documents/{{ doc.id }}">{{ t('journal') }} / {{ t('history') }}</a></p>{% endif %}
+{% endblock %}

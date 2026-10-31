@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% from "macros.html" import m, status with context %}
+{% block title %}{{ t('nav_dashboard') }}{% endblock %}
+{% block content %}
+<h1>{{ t('nav_dashboard') }}</h1>
+{% if not has_opening %}
+<div class="card warn">
+<h2>{{ t('setup_steps') }}</h2>
+<ol class="steps">{% for key, done, url in setup_steps %}<li class="{{ 'done' if done }}"><a href="{{ url }}">{{ t(key) }}</a> {% if done %}✓{% endif %}</li>{% endfor %}</ol>
+</div>
+{% endif %}
+{% if has_opening and user.role in ('admin','accountant','partner') %}
+<div class="actions">
+{% if user.role in ('admin','accountant') %}
+{% for dt in ['CONTRIBUTION','EXPENSE','INVOICE','RECEIPT','PRODUCTION','TRANSFER','ASSET_PURCHASE','CAPITAL_CALL','DISTRIBUTION'] %}<a class="btn" href="/documents/new/{{ dt }}">+ {{ t('doc_' + dt) }}</a>{% endfor %}
+{% else %}
+<a class="btn" href="/documents/new/EXPENSE">+ {{ t('doc_EXPENSE') }}</a><a class="btn" href="/documents/new/PRODUCTION">+ {{ t('doc_PRODUCTION') }}</a>
+{% endif %}
+</div>
+{% endif %}
+<div class="tiles">
+<div class="tile"><div class="label">{{ t('tile_cash') }}</div><div class="value">{{ m(tb.cash) }}</div></div>
+<div class="tile"><div class="label">{{ t('tile_receivable') }}</div><div class="value">{{ m(tb.receivable) }}</div></div>
+<div class="tile"><div class="label">{{ t('tile_assets') }}</div><div class="value">{{ m(tb.fixed_assets) }}</div></div>
+<div class="tile"><div class="label">{{ t('tile_profit') }}</div><div class="value {{ 'neg' if tb.profit < 0 }}">{{ m(tb.profit) }}</div></div>
+<div class="tile"><div class="label">{{ t('tile_distributable') }}</div><div class="value">{{ m(distributable) }}</div></div>
+</div>
+{% if not (tb.balanced and tb.sheet_ok) %}<div class="flash error" role="alert">{{ t('err_books_not_balanced') }}</div>{% endif %}
+<div class="grid2">
+<section class="card"><h2>{{ t('nav_accounts') }}</h2>
+<table><thead><tr><th>{{ t('f_name') }}</th><th class="n">{{ t('col_balance') }}</th></tr></thead><tbody>
+{% for a, b in balances %}<tr class="{{ 'inactive' if not a.active }}"><td><a href="/reports/cash/{{ a.id }}">{{ a.name }}</a></td><td class="n">{{ m(b) }}</td></tr>{% else %}<tr><td colspan="2" class="muted">{{ t('empty') }}</td></tr>{% endfor %}
+</tbody></table></section>
+<section class="card"><h2>{{ t('nav_customers') }}</h2>
+<table><thead><tr><th>{{ t('f_name') }}</th><th class="n">{{ t('col_owed') }}</th></tr></thead><tbody>
+{% for c, b in customers %}<tr><td><a href="/reports/customer/{{ c.id }}">{{ c.name }}</a></td><td class="n">{{ m(b) }}</td></tr>{% else %}<tr><td colspan="2" class="muted">{{ t('empty') }}</td></tr>{% endfor %}
+</tbody></table></section>
+</div>
+{% if partners %}
+<section class="card"><h2>{{ t('nav_partners') }}</h2>
+<div class="scroll"><table><thead><tr><th>{{ t('f_name') }}</th><th class="n">{{ t('col_share') }}</th><th class="n">{{ t('col_capital') }}</th><th class="n">{{ t('col_profit_share') }}</th><th class="n">{{ t('col_distributions') }}</th><th class="n">{{ t('col_equity') }}</th><th class="n">{{ t('col_outstanding_calls') }}</th></tr></thead><tbody>
+{% for r in partners %}<tr><td><a href="/reports/partner/{{ r.partner.id }}">{{ r.partner.name }}</a></td><td class="n"><span class="num" dir="ltr">{{ pct(r.share) }}</span></td><td class="n">{{ m(r.capital) }}</td><td class="n">{{ m(r.profit) }}</td><td class="n">{{ m(r.distributions) }}</td><td class="n">{{ m(r.equity) }}</td><td class="n {{ 'neg' if r.outstanding_calls > 0 }}">{{ m(r.outstanding_calls) }}</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endif %}
+{% if projects %}
+<section class="card"><h2>{{ t('dash_projects_month') }}</h2>
+<div class="scroll"><table><thead><tr><th>{{ t('f_project_id') }}</th><th class="n">{{ t('col_revenue') }}</th><th class="n">{{ t('col_expenses') }}</th><th class="n">{{ t('col_net') }}</th></tr></thead><tbody>
+{% for r in projects %}<tr><td>{{ r.project.name if r.project else t('overhead') }}</td><td class="n">{{ m(r.revenue + r.gain) }}</td><td class="n">{{ m(r.expenses + r.loss) }}</td><td class="n {{ 'neg' if r.net < 0 }}">{{ m(r.net) }}</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endif %}
+<section class="card"><h2>{{ t('dash_recent') }}</h2>
+<div class="scroll"><table><thead><tr><th>{{ t('f_date') }}</th><th>{{ t('col_type') }}</th><th>{{ t('col_number') }}</th><th>{{ t('f_description') }}</th><th class="n">{{ t('f_amount') }}</th><th>{{ t('col_status') }}</th></tr></thead><tbody>
+{% for d in recent %}<tr><td><span class="num" dir="ltr">{{ fdate(d.date) }}</span></td><td><a href="/documents/{{ d.id }}">{{ t('doc_' + d.doc_type) }}</a></td><td><span class="num">{{ num(d.number) }}</span></td><td>{{ d.description }}</td><td class="n">{% if d.doc_type in ('PRODUCTION',) %}<span class="num" dir="ltr">{{ qty(d.quantity) }}</span>{% else %}{{ m(d.amount) }}{% endif %}</td><td>{{ status(d.status) }}</td></tr>{% else %}<tr><td colspan="6" class="muted">{{ t('empty') }}</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endblock %}

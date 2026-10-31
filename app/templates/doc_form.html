@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf_field, err, m with context %}
+{% block title %}{{ t('doc_' + doc_type) }}{% endblock %}
+{% block content %}
+<h1>{% if doc %}{{ t('btn_edit') }}: {{ t('doc_' + doc_type) }} <span class="num">#{{ num(doc.number) }}</span>{% else %}{{ t('new') }}: {{ t('doc_' + doc_type) }}{% endif %}</h1>
+<p class="muted">{{ t('help_' + doc_type) }}</p>
+{% if errors.get('_') %}<div class="flash error" role="alert" data-testid="form-error">{{ errors['_'] }}</div>{% endif %}
+{% if errors and not errors.get('_') %}<div class="flash error" role="alert" data-testid="form-error">{{ t('err_fix_fields') }}</div>{% endif %}
+{% if extra.get('threshold') %}<p class="note">{{ t('note_threshold') }} {{ m(extra.threshold) }}</p>{% endif %}
+{% if doc_type == 'DISTRIBUTION' and extra.get('distributable') is not none %}
+<div class="note"><b>{{ t('tile_distributable') }}:</b> {{ m(extra.distributable) }}
+<div class="muted">{{ t('help_distributable') }}</div></div>
+{% endif %}
+<form class="card form" method="post" enctype="multipart/form-data" novalidate data-testid="doc-form">
+{{ csrf_field() }}
+<label>{{ t('f_date') }} <input type="date" name="date" value="{{ values.get('date','') }}" required data-testid="f-date"></label>
+{{ err(errors, 'date') }}
+{% for field, kind, required in fields %}
+  {% set label = t(field_label(doc_type, field)) %}
+  {% if kind in ('money', 'money0', 'qty') %}
+  <label>{{ label }}{% if required %} *{% endif %}
+    <input type="text" inputmode="decimal" autocomplete="off" name="{{ field }}" value="{{ values.get(field,'') }}" dir="ltr" class="numin" data-kind="{{ kind }}" data-testid="f-{{ field }}">
+    <small class="preview" data-for="{{ field }}" aria-live="polite"></small>
+  </label>
+  {% elif kind == 'text' %}
+  <label>{{ label }}{% if required %} *{% endif %}<input type="text" name="{{ field }}" value="{{ values.get(field,'') }}" maxlength="200" data-testid="f-{{ field }}"></label>
+  {% elif kind == 'category' %}
+  <label>{{ label }} *<select name="category" data-testid="f-category"><option value="">—</option>{% for c in opts.category %}<option value="{{ c }}" {{ 'selected' if values.get('category')==c }}>{{ t('cat_' + c) }}</option>{% endfor %}</select></label>
+  {% elif kind == 'paysource' %}
+  <fieldset class="paysource"><legend>{{ t('f_pay_source') }} *</legend>
+    <label class="inline"><input type="radio" name="pay_source" value="account" {{ 'checked' if values.get('pay_source','account')=='account' }} data-testid="pay-account"> {{ t('pay_from_account') }}</label>
+    <label class="inline"><input type="radio" name="pay_source" value="partner" {{ 'checked' if values.get('pay_source')=='partner' }} data-testid="pay-partner"> {{ t('pay_by_partner') }}</label>
+    <label class="ps-account">{{ t('f_money_account_id') }}<select name="money_account_id" data-testid="f-money_account_id"><option value="">—</option>{% for a in opts.money_account %}<option value="{{ a.id }}" {{ 'selected' if values.get('money_account_id')==a.id|string }}>{{ a.name }}</option>{% endfor %}</select></label>
+    <label class="ps-partner">{{ t('f_paid_by_partner_id') }}<select name="paid_by_partner_id" data-testid="f-paid_by_partner_id"><option value="">—</option>{% for p in opts.pay_partners %}<option value="{{ p.id }}" {{ 'selected' if values.get('paid_by_partner_id')==p.id|string }}>{{ p.name }}</option>{% endfor %}</select></label>
+    <small class="muted">{{ t('help_paid_by_partner') }}</small>
+  </fieldset>
+  {% else %}
+  {% set kind_opts = opts[kind] %}
+  <label>{{ label }}{% if required %} *{% endif %}<select name="{{ field }}" data-testid="f-{{ field }}"><option value="">{{ '—' if required else t('none_option_' + kind) if kind in ('project','call','money_account') else '—' }}</option>
+    {% for o in kind_opts %}<option value="{{ o.id }}" {{ 'selected' if values.get(field)==o.id|string }}>{% if kind == 'call' %}{{ t('doc_CAPITAL_CALL') }} #{{ num(o.number) }} · {{ fdate(o.date) }} · {{ money(o.amount) }}{% else %}{{ o.name }}{% endif %}{% if o.active is defined and not o.active %} ({{ t('inactive') }}){% endif %}</option>{% endfor %}
+  </select></label>
+  {% endif %}
+  {{ err(errors, field) }}
+{% endfor %}
+{% if doc_type == 'INVOICE' %}<p class="note">{{ t('f_total') }}: <b><span class="num" dir="ltr" id="invoice-total" data-testid="invoice-total">—</span></b></p>{% endif %}
+{% if doc_type == 'DISTRIBUTION' and extra.get('shares') %}
+<div class="note"><b>{{ t('dist_split') }}</b><ul id="dist-split" data-shares='{{ extra.shares|tojson }}' data-names='{{ extra.share_names|tojson }}'></ul></div>
+{% endif %}
+<label>{{ t('f_description') }}<textarea name="description" rows="2" data-testid="f-description">{{ values.get('description','') }}</textarea></label>
+{% if attach %}
+<label>{{ t('f_attachment') }}<input type="file" name="attachment" accept=".jpg,.jpeg,.png,.webp,.pdf" data-testid="f-attachment"></label>
+<small class="muted">{{ t('help_attachment') }}</small>
+{% if doc and doc.attachment %}<p><a href="/documents/{{ doc.id }}/attachment" target="_blank">{{ doc.attachment_name or t('f_attachment') }}</a> <label class="inline"><input type="checkbox" name="remove_attachment" value="1"> {{ t('remove_attachment') }}</label></p>{% endif %}
+{% endif %}
+<div class="actions">
+<button class="primary" data-testid="save">{{ t('btn_save') }}</button>
+<a class="btn" href="{{ '/documents/%d' % doc.id if doc else '/documents' }}">{{ t('btn_cancel') }}</a>
+</div>
+</form>
+{% endblock %}

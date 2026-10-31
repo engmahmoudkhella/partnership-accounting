@@ -1,0 +1,273 @@
+"""Strict parsing and formatting of numbers typed in Arabic or English.
+
+Design rules (see README, section "Numbers"):
+
+* Money is stored as an integer number of agorot (1/100 shekel). Shares are
+  stored as parts-per-million of 100% (1,000,000 = 100%). Quantities are stored
+  in thousandths (milli-units). No floats anywhere.
+* Accepted digits: ASCII 0-9, Arabic-Indic (U+0660-0669), Extended
+  Arabic-Indic / Persian (U+06F0-06F9) and full-width digits. They may be mixed.
+* The decimal separator is "." or the Arabic decimal separator "٫" (U+066B).
+* Thousands separators: "," "٬" (U+066C) "،" (U+060C) "'" and spaces
+  (normal, no-break, narrow no-break, thin). They are only accepted in correct
+  groups of three digits, so "1,5" or "12 5" are rejected instead of being
+  silently read as 15.
+* Invisible direction marks that come with copy/paste from Arabic text are
+  removed. A shekel sign or the words "ILS", "شيكل", "شيقل", "شواكل" around the
+  number are removed. Any other text is an error.
+* Negative numbers, exponents, ".5", "5." and more decimals than allowed are
+  errors. Extra decimals that are all zeros ("10.500" for money) are accepted
+  because the value is exact.
+* Values are never rounded silently.
+"""
+
+from __future__ import annotations
+
+import re
+
+MONEY_DECIMALS = 2
+QTY_DECIMALS = 3
+PERCENT_DECIMALS = 4
+
+MAX_MONEY_MINOR = 99_999_999_999  # 999,999,999.99
+MAX_QTY_MILLI = 999_999_999_999  # 999,999,999.999
+PPM_TOTAL = 1_000_000  # 100%
+
+
+class NumberError(ValueError):
+    """Raised for any input that is not an exact, valid number.
+
+    ``code`` is a translation key (see i18n.py) and ``params`` its arguments.
+    """
+
+    def __init__(self, code: str, **params):
+        super().__init__(code)
+        self.code = code
+        self.params = params
+
+
+_DIGIT_MAP = {}
+for _base in (0x0660, 0x06F0, 0xFF10):
+    for _i in range(10):
+        _DIGIT_MAP[chr(_base + _i)] = str(_i)
+
+_INVISIBLE = dict.fromkeys(
+    map(ord, "‎‏​‌‍⁦⁧⁨⁩‪‫‬‭‮﻿؜"),
+    None,
+)
+
+_THOUSANDS_CHARS = ",٬،'    "
+_DECIMAL_CHARS = ".٫"
+_CURRENCY_WORDS = ("₪", "ils", "nis", "شيكل", "شيقل", "شواكل", "شيكلات", "ش.ج")
+
+_PLAIN_RE = re.compile(r"^(\d+)(?:\.(\d+))?$")
+_GROUPED_RE = re.compile(r"^(\d{1,3}(?:,\d{3})+)(?:\.(\d+))?$")
+
+
+def normalize_digits(text: str) -> str:
+    """Convert Arabic-Indic / Persian / full-width digits to ASCII."""
+    return "".join(_DIGIT_MAP.get(ch, ch) for ch in text)
+
+
+def _clean(text) -> str:
+    if text is None:
+        raise NumberError("err_number_required")
+    if not isinstance(text, str):
+        text = str(text)
+    s = text.translate(_INVISIBLE).strip()
+    s = normalize_digits(s)
+    low = s.lower()
+    changed = True
+    while changed:
+        changed = False
+        for word in _CURRENCY_WORDS:
+            if low.startswith(word):
+                s, low = s[len(word):].strip(), low[len(word):].strip()
+                changed = True
+            if low.endswith(word):
+                s, low = s[: -len(word)].strip(), low[: -len(word)].strip()
+                changed = True
+    if s == "":
+        raise NumberError("err_number_required")
+    return s
+
+
+def _parse_decimal(text, decimals: int) -> int:
+    """Return the value multiplied by 10**decimals as an exact int."""
+    s = _clean(text)
+    if s.startswith("-") or s.startswith("−") or (s.startswith("(") and s.endswith(")")):
+        raise NumberError("err_number_negative")
+    if s.startswith("+"):
+        raise NumberError("err_number_format")
+    # unify separators
+    out = []
+    for ch in s:
+        if ch in _DECIMAL_CHARS:
+            out.append(".")
+        elif ch in _THOUSANDS_CHARS:
+            out.append(",")
+        else:
+            out.append(ch)
+    s = "".join(out)
+    if s.count(".") > 1:
+        raise NumberError("err_number_format")
+    m = _PLAIN_RE.match(s) or _GROUPED_RE.match(s)
+    if not m:
+        if re.fullmatch(r"\d+,\d{1,2}", s):
+            # very likely a comma used as a decimal separator: "12,5"
+            raise NumberError("err_number_comma_decimal")
+        raise NumberError("err_number_format")
+    int_part = m.group(1).replace(",", "")
+    frac = m.group(2) or ""
+    if len(frac) > decimals:
+        extra = frac[decimals:]
+        if set(extra) != {"0"}:
+            raise NumberError("err_number_too_many_decimals", decimals=decimals)
+        frac = frac[:decimals]
+    frac = frac.ljust(decimals, "0")
+    return int(int_part) * (10 ** decimals) + (int(frac) if frac else 0)
+
+
+def parse_money(text, *, allow_zero: bool = False) -> int:
+    """Parse a shekel amount and return agorot (int)."""
+    value = _parse_decimal(text, MONEY_DECIMALS)
+    if value == 0 and not allow_zero:
+        raise NumberError("err_number_zero")
+    if value > MAX_MONEY_MINOR:
+        raise NumberError("err_number_too_large")
+    return value
+
+
+def parse_quantity(text, *, allow_zero: bool = False) -> int:
+    """Parse a quantity and return thousandths (int)."""
+    value = _parse_decimal(text, QTY_DECIMALS)
+    if value == 0 and not allow_zero:
+        raise NumberError("err_number_zero")
+    if value > MAX_QTY_MILLI:
+        raise NumberError("err_number_too_large")
+    return value
+
+
+def parse_percent(text, *, allow_zero: bool = False) -> int:
+    """Parse a percentage (e.g. "16.6667") and return parts per million."""
+    s = _clean(text)
+    if s.endswith("%") or s.endswith("٪"):
+        s = s[:-1].strip()
+    elif s.startswith("%") or s.startswith("٪"):
+        s = s[1:].strip()
+    value = _parse_decimal(s, PERCENT_DECIMALS)
+    if value == 0 and not allow_zero:
+        raise NumberError("err_number_zero")
+    if value > PPM_TOTAL:
+        raise NumberError("err_percent_over_100")
+    return value
+
+
+def parse_int(text, *, allow_zero: bool = True) -> int:
+    value = _parse_decimal(text, 0)
+    if value == 0 and not allow_zero:
+        raise NumberError("err_number_zero")
+    return value
+
+
+# ---------------------------------------------------------------- formatting
+
+_AR_DIGITS = str.maketrans("0123456789,.", "٠١٢٣٤٥٦٧٨٩٬٫")
+
+
+def _group(n: int) -> str:
+    return f"{n:,}"
+
+
+def _fmt_fixed(value: int, decimals: int, digits: str, strip_zeros: bool = False) -> str:
+    neg = value < 0
+    value = abs(value)
+    base = 10 ** decimals
+    whole, frac = divmod(value, base)
+    s = _group(whole)
+    if decimals:
+        f = str(frac).rjust(decimals, "0")
+        if strip_zeros:
+            f = f.rstrip("0")
+        if f:
+            s += "." + f
+    if neg:
+        s = "-" + s
+    if digits == "arab":
+        s = s.translate(_AR_DIGITS)
+    return s
+
+
+def format_money(minor: int, digits: str = "latn") -> str:
+    return _fmt_fixed(int(minor), MONEY_DECIMALS, digits)
+
+
+def format_quantity(milli: int, digits: str = "latn") -> str:
+    return _fmt_fixed(int(milli), QTY_DECIMALS, digits, strip_zeros=True)
+
+
+def format_percent(ppm: int, digits: str = "latn") -> str:
+    return _fmt_fixed(int(ppm), PERCENT_DECIMALS, digits, strip_zeros=True) + "%"
+
+
+def money_input_value(minor: int | None) -> str:
+    """Value placed back into an <input> when editing (plain, no grouping)."""
+    if minor is None:
+        return ""
+    whole, frac = divmod(int(minor), 100)
+    return f"{whole}.{frac:02d}"
+
+
+def qty_input_value(milli: int | None) -> str:
+    if milli is None:
+        return ""
+    whole, frac = divmod(int(milli), 1000)
+    f = f"{frac:03d}".rstrip("0")
+    return f"{whole}.{f}" if f else str(whole)
+
+
+def percent_input_value(ppm: int | None) -> str:
+    if ppm is None:
+        return ""
+    whole, frac = divmod(int(ppm), 10000)
+    f = f"{frac:04d}".rstrip("0")
+    return f"{whole}.{f}" if f else str(whole)
+
+
+# ---------------------------------------------------------------- arithmetic
+
+def round_half_up_div(numerator: int, denominator: int) -> int:
+    """Integer division rounding half away from zero (for non-negative inputs)."""
+    if denominator <= 0:
+        raise ValueError("denominator must be positive")
+    if numerator < 0:
+        return -round_half_up_div(-numerator, denominator)
+    q, r = divmod(numerator, denominator)
+    return q + (1 if 2 * r >= denominator else 0)
+
+
+def line_total(qty_milli: int, unit_price_minor: int) -> int:
+    """quantity x unit price, rounded half-up to the agora."""
+    return round_half_up_div(qty_milli * unit_price_minor, 1000)
+
+
+def allocate(amount: int, weights: list[tuple[object, int]]) -> dict:
+    """Split ``amount`` (int, may be negative) by integer ``weights``.
+
+    Largest-remainder method: every part is floor/ceil of its exact share and
+    the parts always add up to exactly ``amount``. Ties are broken by the order
+    of ``weights`` so the result is deterministic.
+    """
+    total_w = sum(w for _, w in weights)
+    if total_w <= 0:
+        raise ValueError("weights must sum to a positive number")
+    sign = -1 if amount < 0 else 1
+    a = abs(amount)
+    parts = []
+    for idx, (key, w) in enumerate(weights):
+        q, r = divmod(a * w, total_w)
+        parts.append([key, q, r, idx])
+    left = a - sum(p[1] for p in parts)
+    for p in sorted(parts, key=lambda p: (-p[2], p[3]))[:left]:
+        p[1] += 1
+    return {p[0]: sign * p[1] for p in parts}

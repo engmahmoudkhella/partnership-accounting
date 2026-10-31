@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "macros.html" import m with context %}
+{% block title %}{{ t('rep_trial') }}{% endblock %}
+{% block content %}
+{% include "_reports_nav.html" %}
+<h1>{{ t('rep_trial') }}</h1>
+<form class="filters"><label class="inline">{{ t('as_of') }} <input type="date" name="as_of" value="{{ as_of.isoformat() if as_of else '' }}"></label><button>{{ t('btn_filter') }}</button></form>
+<div class="grid2">
+<section class="card"><table data-testid="trial"><thead><tr><th>{{ t('col_account') }}</th><th class="n">{{ t('col_debit') }}</th><th class="n">{{ t('col_credit') }}</th></tr></thead><tbody>
+{% for acc in ['1100','1200','1500','3100','3200','4100','4900','5100','5900'] %}{% set r = tb.rows.get(acc, (0,0)) %}<tr><td>{{ acc }} · {{ t('acc_' + acc) }}</td><td class="n">{{ m(r[0]) }}</td><td class="n">{{ m(r[1]) }}</td></tr>{% endfor %}
+</tbody><tfoot><tr><th>{{ t('total') }}</th><th class="n">{{ m(tb.total_debit) }}</th><th class="n">{{ m(tb.total_credit) }}</th></tr></tfoot></table>
+<p class="{{ 'ok' if tb.balanced else 'neg' }}" data-testid="trial-status">{{ t('trial_ok') if tb.balanced else t('err_books_not_balanced') }}</p></section>
+<section class="card"><h2>{{ t('balance_sheet') }}</h2><table class="kv" data-testid="sheet">
+<tr><th>{{ t('acc_1100') }}</th><td class="n">{{ m(tb.cash) }}</td></tr>
+<tr><th>{{ t('acc_1200') }}</th><td class="n">{{ m(tb.receivable) }}</td></tr>
+<tr><th>{{ t('acc_1500') }}</th><td class="n">{{ m(tb.fixed_assets) }}</td></tr>
+<tr class="total"><th>{{ t('total_assets') }}</th><td class="n">{{ m(tb.assets) }}</td></tr>
+<tr><th>{{ t('acc_3100') }}</th><td class="n">{{ m(tb.capital) }}</td></tr>
+<tr><th>{{ t('tile_profit') }}</th><td class="n">{{ m(tb.profit) }}</td></tr>
+<tr><th>− {{ t('acc_3200') }}</th><td class="n">{{ m(tb.distributions) }}</td></tr>
+<tr class="total"><th>{{ t('total_equity') }}</th><td class="n">{{ m(tb.equity) }}</td></tr>
+</table><p class="{{ 'ok' if tb.sheet_ok else 'neg' }}">{{ t('sheet_ok') if tb.sheet_ok else t('err_books_not_balanced') }}</p></section>
+</div>
+{% endblock %}

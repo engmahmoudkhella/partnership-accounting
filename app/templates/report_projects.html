@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% from "macros.html" import m with context %}
+{% block title %}{{ t('rep_projects') }}{% endblock %}
+{% block content %}
+{% include "_reports_nav.html" %}
+<h1>{{ t('rep_projects') }}</h1>
+<form class="filters"><label class="inline">{{ t('from') }} <input type="date" name="from" value="{{ d1.isoformat() if d1 else '' }}"></label><label class="inline">{{ t('to') }} <input type="date" name="to" value="{{ d2.isoformat() if d2 else '' }}"></label><button>{{ t('btn_filter') }}</button></form>
+{% for r in rows %}
+<section class="card"><h2>{{ r.project.name if r.project else t('overhead') }}</h2>
+<div class="grid2"><table class="kv" data-testid="project-{{ r.project.id if r.project else 'overhead' }}">
+<tr><th>{{ t('col_revenue') }}</th><td class="n">{{ m(r.revenue) }}</td></tr>
+{% if r.gain %}<tr><th>{{ t('acc_4900') }}</th><td class="n">{{ m(r.gain) }}</td></tr>{% endif %}
+{% for c in categories %}{% if r.categories[c] %}<tr><th>− {{ t('cat_' + c) }}</th><td class="n">{{ m(r.categories[c]) }}</td></tr>{% endif %}{% endfor %}
+{% if r.loss %}<tr><th>− {{ t('acc_5900') }}</th><td class="n">{{ m(r.loss) }}</td></tr>{% endif %}
+<tr class="total"><th>{{ t('col_net') }}</th><td class="n {{ 'neg' if r.net < 0 }}">{{ m(r.net) }}</td></tr></table>
+<table class="kv">
+<tr><th>{{ t('units_produced') }}</th><td class="n"><span class="num" dir="ltr">{{ qty(r.produced) }}</span> {{ r.project.unit_name if r.project }}</td></tr>
+<tr><th>{{ t('units_invoiced') }}</th><td class="n"><span class="num" dir="ltr">{{ qty(r.invoiced) }}</span></td></tr>
+<tr><th>{{ t('cost_per_unit') }}</th><td class="n">{{ m(r.cost_per_unit) if r.cost_per_unit is not none else '—' }}</td></tr>
+<tr><th>{{ t('profit_per_unit') }}</th><td class="n">{{ m(r.profit_per_unit) if r.profit_per_unit is not none else '—' }}</td></tr>
+</table></div><p class="muted">{{ t('help_unit_cost') }}</p></section>
+{% else %}<p class="muted">{{ t('empty') }}</p>{% endfor %}
+{% endblock %}

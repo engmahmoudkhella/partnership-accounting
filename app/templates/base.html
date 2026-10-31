@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="{{ lang }}" dir="{{ dir }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ t('app_name') }}{% endblock %} · {{ company or t('app_name') }}</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+{% if user %}
+<header class="top">
+  <a class="brand" href="/">{{ company or t('app_name') }}</a>
+  <button class="menu-btn" type="button" aria-label="{{ t('menu') }}" onclick="document.body.classList.toggle('nav-open')">☰</button>
+  <nav class="nav">
+    <a href="/">{{ t('nav_dashboard') }}</a>
+    <a href="/documents">{{ t('nav_documents') }}</a>
+    <a href="/documents?awaiting=me" data-testid="nav-approvals">{{ t('nav_approvals') }}{% if pending_count %} <span class="badge">{{ num(pending_count) }}</span>{% endif %}</a>
+    <a href="/opening">{{ t('nav_opening') }}</a>
+    <a href="/partners">{{ t('nav_partners') }}</a>
+    <a href="/master/project">{{ t('nav_projects') }}</a>
+    <a href="/master/money_account">{{ t('nav_accounts') }}</a>
+    <a href="/master/customer">{{ t('nav_customers') }}</a>
+    <a href="/assets">{{ t('nav_assets') }}</a>
+    <a href="/months">{{ t('nav_months') }}</a>
+    <span class="dropdown"><a href="/reports/partners">{{ t('nav_reports') }}</a></span>
+    <a href="/audit">{{ t('nav_audit') }}</a>
+    {% if user.role == 'admin' %}<a href="/users">{{ t('nav_users') }}</a><a href="/settings">{{ t('nav_settings') }}</a>{% endif %}
+  </nav>
+  <div class="who">
+    <a href="/lang/{{ 'en' if lang == 'ar' else 'ar' }}" data-testid="lang-switch">{{ 'English' if lang == 'ar' else 'العربية' }}</a>
+    <a href="/account">{{ user.full_name }} · {{ t('role_' + user.role) }}</a>
+    <form method="post" action="/logout" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">{{ t('logout') }}</button></form>
+  </div>
+</header>
+{% else %}
+<header class="top"><span class="brand">{{ company or t('app_name') }}</span>
+  <div class="who"><a href="/lang/{{ 'en' if lang == 'ar' else 'ar' }}" data-testid="lang-switch">{{ 'English' if lang == 'ar' else 'العربية' }}</a></div>
+</header>
+{% endif %}
+<main>
+{% for kind, msg in flashes %}<div class="flash {{ kind }}" role="{{ 'alert' if kind == 'error' else 'status' }}">{{ msg }}</div>{% endfor %}
+{% block content %}{% endblock %}
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% from "macros.html" import m, status with context %}
+{% block title %}{{ t('nav_assets') }}{% endblock %}
+{% block content %}
+{% include "_reports_nav.html" %}
+<h1>{{ t('nav_assets') }}</h1>
+{% if user.role in ('admin','accountant') %}<p><a class="btn" href="/documents/new/ASSET_PURCHASE">+ {{ t('doc_ASSET_PURCHASE') }}</a> <a class="btn" href="/documents/new/ASSET_DISPOSAL">+ {{ t('doc_ASSET_DISPOSAL') }}</a></p>{% endif %}
+<section class="card"><div class="scroll"><table data-testid="assets-table"><thead><tr><th>{{ t('f_asset_name') }}</th><th>{{ t('f_project_id') }}</th><th>{{ t('col_source') }}</th><th class="n">{{ t('col_cost') }}</th><th class="n">{{ t('col_book') }}</th><th>{{ t('col_status') }}</th></tr></thead><tbody>
+{% for r in rows %}<tr class="{{ 'void' if not r.src or r.src.status == 'VOID' }}"><td>{{ r.asset.name }}</td><td>{{ names.project.get(r.asset.project_id, '') }}</td>
+<td>{% if r.src %}<a href="/documents/{{ r.src.id }}">{{ t('doc_' + r.src.doc_type) }} #{{ num(r.src.number) }}</a> {{ status(r.src.status) }}{% endif %}</td>
+<td class="n">{{ m(r.cost) }}</td><td class="n">{{ m(r.book) }}</td>
+<td>{% if r.disposal %}<a href="/documents/{{ r.disposal.id }}">{{ t('asset_disposed') }}</a> {{ status(r.disposal.status) }}{% elif r.src and r.src.status == 'POSTED' %}{{ t('asset_owned') }}{% else %}—{% endif %}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">{{ t('empty') }}</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endblock %}

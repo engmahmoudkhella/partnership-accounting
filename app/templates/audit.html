@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}{{ t('nav_audit') }}{% endblock %}
+{% block content %}
+<h1>{{ t('nav_audit') }}</h1>
+<p class="muted">{{ t('help_audit') }}</p>
+<form class="filters"><select name="action"><option value="">{{ t('all_actions') }}</option>{% for a in ['create','update','void','delete','approve','reject','post','lock','unlock','signoff','signoffs_cleared','login','login_failed','activate','deactivate','change_password','backup'] %}<option value="{{ a }}" {{ 'selected' if q.get('action')==a }}>{{ t('act_' + a) }}</option>{% endfor %}</select><button>{{ t('btn_filter') }}</button></form>
+<section class="card"><div class="scroll"><table data-testid="audit-table"><thead><tr><th>{{ t('col_when') }}</th><th>{{ t('col_user') }}</th><th>{{ t('col_action') }}</th><th>{{ t('col_entity') }}</th><th>{{ t('col_changes') }}</th></tr></thead><tbody>
+{% for h in rows %}<tr><td><span class="num" dir="ltr">{{ h.at.strftime('%Y-%m-%d %H:%M:%S') }}</span></td><td>{{ names.user.get(h.user_id, '') }}</td><td>{{ t('act_' + h.action) }}{% if h.note %} — {{ h.note }}{% endif %}</td>
+<td>{% if h.entity == 'document' and h.entity_id %}<a href="/documents/{{ h.entity_id }}">{{ t('ent_' + h.entity) }} {{ h.entity_id }}</a>{% else %}{{ t('ent_' + h.entity) }} {{ h.entity_id or '' }}{% endif %}</td>
+<td><details><summary>{{ t('details') }}</summary><pre dir="ltr">{% if h.before %}- {{ h.before|tojson(indent=1) }}{% endif %}
+{% if h.after %}+ {{ h.after|tojson(indent=1) }}{% endif %}</pre></details></td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endblock %}

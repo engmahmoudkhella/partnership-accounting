@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "macros.html" import m with context %}
+{% block title %}{{ p.name }}{% endblock %}
+{% block content %}
+{% include "_reports_nav.html" %}
+<h1>{{ t('rep_partner_statement') }}: {{ p.name }}</h1>
+{% if summary %}<div class="tiles">
+<div class="tile"><div class="label">{{ t('col_capital') }}</div><div class="value">{{ m(summary.capital) }}</div></div>
+<div class="tile"><div class="label">{{ t('col_profit_share') }}</div><div class="value">{{ m(summary.profit) }}</div></div>
+<div class="tile"><div class="label">{{ t('col_distributions') }}</div><div class="value">{{ m(summary.distributions) }}</div></div>
+<div class="tile"><div class="label">{{ t('col_equity') }}</div><div class="value">{{ m(summary.equity) }}</div></div>
+<div class="tile"><div class="label">{{ t('col_outstanding_calls') }}</div><div class="value">{{ m(summary.outstanding_calls) }}</div></div>
+</div>{% endif %}
+<section class="card"><div class="scroll"><table data-testid="partner-lines"><thead><tr><th>{{ t('f_date') }}</th><th>{{ t('col_type') }}</th><th>{{ t('col_account') }}</th><th>{{ t('f_description') }}</th><th class="n">{{ t('col_in') }}</th><th class="n">{{ t('col_out') }}</th></tr></thead><tbody>
+{% for ln, d in lines %}<tr><td><span class="num" dir="ltr">{{ fdate(ln.date) }}</span></td><td><a href="/documents/{{ d.id }}">{{ t('doc_' + d.doc_type) }} #{{ num(d.number) }}</a></td><td>{{ t('acc_' + ln.account) }}</td><td>{{ d.description }}</td><td class="n">{% if ln.credit %}{{ m(ln.credit) }}{% endif %}</td><td class="n">{% if ln.debit %}{{ m(ln.debit) }}{% endif %}</td></tr>{% else %}<tr><td colspan="6" class="muted">{{ t('empty') }}</td></tr>{% endfor %}
+</tbody></table></div><p class="muted">{{ t('help_partner_statement') }}</p></section>
+{% endblock %}

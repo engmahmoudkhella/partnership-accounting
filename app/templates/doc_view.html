@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% from "macros.html" import m, status, csrf_field with context %}
+{% block title %}{{ t('doc_' + doc.doc_type) }} #{{ doc.number }}{% endblock %}
+{% block content %}
+<h1>{{ t('doc_' + doc.doc_type) }} <span class="num">#{{ num(doc.number) }}</span> {{ status(doc.status) }}</h1>
+{% if locked %}<div class="note">🔒 {{ t('msg_month_locked_doc') }}</div>{% endif %}
+{% if doc.status == 'VOID' %}<div class="flash error">{{ t('msg_voided_by') }} {{ names.user.get(doc.voided_by, '') }} · {{ doc.voided_at.strftime('%Y-%m-%d %H:%M') if doc.voided_at }} — {{ doc.void_reason }}</div>{% endif %}
+<div class="grid2">
+<section class="card"><table class="kv" data-testid="doc-details">
+<tr><th>{{ t('f_date') }}</th><td><span class="num" dir="ltr">{{ fdate(doc.date) }}</span></td></tr>
+{% if doc.partner_id %}<tr><th>{{ t('f_payer_partner' if doc.doc_type == 'CAPITAL_TRANSFER' else 'f_partner_id') }}</th><td>{{ names.partner.get(doc.partner_id) }}</td></tr>{% endif %}
+{% if doc.partner2_id %}<tr><th>{{ t('f_receiver_partner') }}</th><td>{{ names.partner.get(doc.partner2_id) }}</td></tr>{% endif %}
+{% if doc.customer_id %}<tr><th>{{ t('f_customer_id') }}</th><td>{{ names.customer.get(doc.customer_id) }}</td></tr>{% endif %}
+{% if doc.project_id %}<tr><th>{{ t('f_project_id') }}</th><td>{{ names.project.get(doc.project_id) }}</td></tr>{% endif %}
+{% if asset %}<tr><th>{{ t('f_asset_id') }}</th><td>{{ asset.name }}</td></tr>{% endif %}
+{% if doc.category %}<tr><th>{{ t('f_category') }}</th><td>{{ t('cat_' + doc.category) }}</td></tr>{% endif %}
+{% if doc.money_account_id %}<tr><th>{{ t('f_from_account' if doc.doc_type == 'TRANSFER' else 'f_money_account_id') }}</th><td>{{ names.money_account.get(doc.money_account_id) }}</td></tr>{% endif %}
+{% if doc.money_account2_id %}<tr><th>{{ t('f_to_account') }}</th><td>{{ names.money_account.get(doc.money_account2_id) }}</td></tr>{% endif %}
+{% if doc.paid_by_partner_id %}<tr><th>{{ t('f_paid_by_partner_id') }}</th><td>{{ names.partner.get(doc.paid_by_partner_id) }}</td></tr>{% endif %}
+{% if doc.quantity %}<tr><th>{{ t('f_quantity') }}</th><td><span class="num" dir="ltr">{{ qty(doc.quantity) }}</span></td></tr>{% endif %}
+{% if doc.unit_price %}<tr><th>{{ t('f_unit_price') }}</th><td>{{ m(doc.unit_price) }}</td></tr>{% endif %}
+{% if doc.doc_type not in ('PRODUCTION',) %}<tr><th>{{ t(field_label(doc.doc_type, 'amount') if doc.doc_type in ('ASSET_DISPOSAL','CAPITAL_CALL','TRANSFER','RECEIPT') else 'f_amount') }}</th><td data-testid="doc-amount">{{ m(doc.amount) }}</td></tr>{% endif %}
+{% if doc.fee %}<tr><th>{{ t('f_fee') }}</th><td>{{ m(doc.fee) }}</td></tr>{% endif %}
+{% if doc.supplier %}<tr><th>{{ t('f_supplier') }}</th><td>{{ doc.supplier }}</td></tr>{% endif %}
+{% if doc.capital_call_id %}<tr><th>{{ t('f_capital_call_id') }}</th><td><a href="/documents/{{ doc.capital_call_id }}">#{{ doc.capital_call_id }}</a></td></tr>{% endif %}
+{% if doc.description %}<tr><th>{{ t('f_description') }}</th><td>{{ doc.description }}</td></tr>{% endif %}
+{% if doc.attachment %}<tr><th>{{ t('f_attachment') }}</th><td><a href="/documents/{{ doc.id }}/attachment" target="_blank">{{ doc.attachment_name or t('f_attachment') }}</a></td></tr>{% endif %}
+<tr><th>{{ t('col_created') }}</th><td>{{ names.user.get(doc.created_by, '') }} · {{ doc.created_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>
+</table>
+{% if doc.call_shares %}<h3>{{ t('call_shares') }}</h3><table><thead><tr><th>{{ t('f_partner_id') }}</th><th class="n">{{ t('f_amount') }}</th><th class="n">{{ t('col_paid') }}</th></tr></thead><tbody>
+{% for cs in doc.call_shares %}{% set paid = linked|selectattr('status','equalto','POSTED')|selectattr('partner_id','equalto',cs.partner_id)|map(attribute='amount')|sum %}<tr><td>{{ names.partner.get(cs.partner_id) }}</td><td class="n">{{ m(cs.amount) }}</td><td class="n">{{ m(paid) }}</td></tr>{% endfor %}</tbody></table>
+{% if doc.status == 'POSTED' and user.role in ('admin','accountant') %}<p><a class="btn" href="/documents/new/CONTRIBUTION">+ {{ t('doc_CONTRIBUTION') }}</a></p>{% endif %}
+{% endif %}
+</section>
+<section class="card">
+<h2>{{ t('journal') }}</h2>
+{% if doc.lines %}
+<table data-testid="journal"><thead><tr><th>{{ t('col_account') }}</th><th>{{ t('col_details') }}</th><th class="n">{{ t('col_debit') }}</th><th class="n">{{ t('col_credit') }}</th></tr></thead><tbody>
+{% for ln in doc.lines %}<tr><td>{{ t('acc_' + ln.account) }}</td><td>{{ names.money_account.get(ln.money_account_id) or names.partner.get(ln.partner_id) or names.customer.get(ln.customer_id) or names.asset.get(ln.asset_id) or '' }}{% if ln.category %} · {{ t('cat_' + ln.category) }}{% endif %}</td><td class="n">{% if ln.debit %}{{ m(ln.debit) }}{% endif %}</td><td class="n">{% if ln.credit %}{{ m(ln.credit) }}{% endif %}</td></tr>{% endfor %}
+</tbody></table>
+{% else %}<p class="muted">{{ t('journal_none_' + ('memo' if doc.doc_type in ('CAPITAL_CALL','PRODUCTION') else doc.status|lower)) }}</p>{% endif %}
+
+{% if approvers or doc.approvals %}
+<h2>{{ t('approvals') }}</h2>
+<ul class="approvals" data-testid="approvals">{% for u in approvers %}{% set a = doc.approvals|selectattr('user_id','equalto',u.id)|first %}<li>{{ u.full_name }}: {% if a %}<b class="{{ 'neg' if a.decision=='reject' }}">{{ t('decision_' + a.decision) }}</b> {{ a.note }}{% else %}<span class="muted">{{ t('decision_waiting') }}</span>{% endif %}</li>{% endfor %}</ul>
+{% endif %}
+{% if can_decide and not locked %}
+<form method="post" action="/documents/{{ doc.id }}/decide" class="inline-form">{{ csrf_field() }}
+<input name="note" placeholder="{{ t('f_note') }}" data-testid="decide-note">
+<button name="decision" value="approve" class="primary" data-testid="approve">{{ t('btn_approve') }}</button>
+<button name="decision" value="reject" class="danger" data-testid="reject">{{ t('btn_reject') }}</button>
+</form>
+{% endif %}
+{% if doc.status == 'PENDING' and user.role in ('admin','accountant') and approvers and (doc.approvals|selectattr('decision','equalto','approve')|list|length) >= approvers|length %}
+<form method="post" action="/documents/{{ doc.id }}/post">{{ csrf_field() }}<button class="primary">{{ t('btn_post') }}</button></form>
+{% endif %}
+</section>
+</div>
+
+{% set own = doc.created_by == user.id %}
+{% set can_edit = (user.role in ('admin','accountant') and doc.status in ('POSTED','PENDING','REJECTED')) or (user.role == 'partner' and own and doc.status in ('PENDING','REJECTED')) %}
+{% set can_delete = doc.status in ('PENDING','REJECTED') and (user.role in ('admin','accountant') or (user.role == 'partner' and own)) %}
+{% if not locked and doc.doc_type != 'OPENING' and (can_edit or can_delete) %}
+<section class="card actions-card">
+{% if can_edit %}
+<a class="btn" href="/documents/{{ doc.id }}/edit" data-testid="edit">{{ t('btn_edit') }}</a>
+{% endif %}
+{% if doc.status == 'POSTED' and user.role in ('admin','accountant') %}
+<form method="post" action="/documents/{{ doc.id }}/void" class="inline-form confirm" data-confirm="{{ t('confirm_void') }}">{{ csrf_field() }}
+<input name="reason" required minlength="3" placeholder="{{ t('f_void_reason') }}" data-testid="void-reason">
+<button class="danger" data-testid="void">{{ t('btn_void') }}</button></form>
+<p class="muted">{{ t('help_void') }}</p>
+{% endif %}
+{% if can_delete %}
+<form method="post" action="/documents/{{ doc.id }}/delete" class="inline-form confirm" data-confirm="{{ t('confirm_delete') }}">{{ csrf_field() }}
+<input name="reason" placeholder="{{ t('f_reason_optional') }}">
+<button class="danger" data-testid="delete">{{ t('btn_delete') }}</button></form>
+<p class="muted">{{ t('help_delete') }}</p>
+{% endif %}
+</section>
+{% endif %}
+{% if doc.doc_type == 'OPENING' %}<p><a class="btn" href="/opening">{{ t('nav_opening') }}</a></p>{% endif %}
+
+<section class="card"><h2>{{ t('history') }}</h2>
+<table data-testid="history"><thead><tr><th>{{ t('col_when') }}</th><th>{{ t('col_user') }}</th><th>{{ t('col_action') }}</th><th>{{ t('col_changes') }}</th></tr></thead><tbody>
+{% for h in history %}<tr><td><span class="num" dir="ltr">{{ h.at.strftime('%Y-%m-%d %H:%M:%S') }}</span></td><td>{{ names.user.get(h.user_id, '') }}</td><td>{{ t('act_' + h.action) }}{% if h.note %} — {{ h.note }}{% endif %}</td>
+<td>{% if h.before and h.after %}<ul class="diff">{% for k, v in h.after.items() %}{% if h.before.get(k) != v and k not in hidden_fields %}<li>{{ field_name(k) }}: <del>{{ field_value(k, h.before.get(k), names) }}</del> → <ins>{{ field_value(k, v, names) }}</ins></li>{% endif %}{% endfor %}</ul>{% endif %}</td></tr>{% endfor %}
+</tbody></table></section>
+{% endblock %}

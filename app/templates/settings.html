@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf_field with context %}
+{% block title %}{{ t('nav_settings') }}{% endblock %}
+{% block content %}
+<h1>{{ t('nav_settings') }}</h1>
+<form method="post" class="card form" data-testid="settings-form">{{ csrf_field() }}
+<label>{{ t('settings_company') }}<input name="company_name" value="{{ company }}"></label>
+<label>{{ t('settings_threshold') }}<input type="text" inputmode="decimal" dir="ltr" class="numin" data-kind="money0" name="threshold" value="{{ threshold }}" data-testid="threshold"><small class="preview" data-for="threshold"></small></label>
+<small class="muted">{{ t('help_threshold') }}</small>
+<p>{{ t('settings_approvers') }}: {% for u in approvers %}<b>{{ u.full_name }}</b>{% if not loop.last %}، {% endif %}{% else %}<span class="muted">{{ t('no_approvers') }}</span>{% endfor %}</p>
+<button class="primary">{{ t('btn_save') }}</button>
+</form>
+<section class="card"><h2>{{ t('backup_title') }}</h2><p class="muted">{{ t('help_backup') }}</p><a class="btn" href="/backup">{{ t('btn_backup') }}</a></section>
+{% endblock %}

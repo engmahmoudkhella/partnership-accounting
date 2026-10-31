@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% from "macros.html" import m, status with context %}
+{% block title %}{{ t('nav_documents') }}{% endblock %}
+{% block content %}
+<h1>{{ t('nav_documents') }}</h1>
+<form class="filters" method="get">
+<select name="type"><option value="">{{ t('all_types') }}</option>{% for dt in doc_types %}<option value="{{ dt }}" {{ 'selected' if q.get('type')==dt }}>{{ t('doc_' + dt) }}</option>{% endfor %}</select>
+<select name="status"><option value="">{{ t('all_statuses') }}</option>{% for st in ['POSTED','PENDING','REJECTED','VOID'] %}<option value="{{ st }}" {{ 'selected' if q.get('status')==st }}>{{ t('status_' + st) }}</option>{% endfor %}</select>
+<select name="project"><option value="">{{ t('all_projects') }}</option>{% for p in projects %}<option value="{{ p.id }}" {{ 'selected' if q.get('project')==p.id|string }}>{{ p.name }}</option>{% endfor %}</select>
+<select name="partner"><option value="">{{ t('all_partners') }}</option>{% for p in partners %}<option value="{{ p.id }}" {{ 'selected' if q.get('partner')==p.id|string }}>{{ p.name }}</option>{% endfor %}</select>
+<label class="inline">{{ t('from') }} <input type="date" name="from" value="{{ q.get('from','') }}"></label>
+<label class="inline">{{ t('to') }} <input type="date" name="to" value="{{ q.get('to','') }}"></label>
+<input type="search" name="q" value="{{ q.get('q','') }}" placeholder="{{ t('search') }}">
+{% if q.get('awaiting') %}<input type="hidden" name="awaiting" value="{{ q.get('awaiting') }}">{% endif %}
+<button>{{ t('btn_filter') }}</button>
+<a class="btn" href="/export/documents.csv">{{ t('btn_export_csv') }}</a>
+</form>
+<div class="scroll"><table data-testid="documents-table"><thead><tr><th>{{ t('f_date') }}</th><th>{{ t('col_type') }}</th><th>{{ t('col_number') }}</th><th>{{ t('col_details') }}</th><th>{{ t('f_description') }}</th><th class="n">{{ t('f_amount') }}</th><th>{{ t('col_status') }}</th></tr></thead><tbody>
+{% for d in docs %}<tr class="{{ 'void' if d.status == 'VOID' }}">
+<td><span class="num" dir="ltr">{{ fdate(d.date) }}</span></td>
+<td><a href="/documents/{{ d.id }}">{{ t('doc_' + d.doc_type) }}</a></td>
+<td><span class="num">{{ num(d.number) }}</span></td>
+<td>{{ names.partner.get(d.partner_id) or names.partner.get(d.paid_by_partner_id) or names.customer.get(d.customer_id) or '' }}{% if d.project_id %} · {{ names.project.get(d.project_id) }}{% endif %}{% if d.category %} · {{ t('cat_' + d.category) }}{% endif %}</td>
+<td>{{ d.description }}</td>
+<td class="n">{% if d.doc_type == 'PRODUCTION' %}<span class="num" dir="ltr">{{ qty(d.quantity) }}</span>{% else %}{{ m(d.amount) }}{% endif %}</td>
+<td>{{ status(d.status) }}</td></tr>
+{% else %}<tr><td colspan="7" class="muted">{{ t('empty') }}</td></tr>{% endfor %}
+</tbody></table></div>
+{% endblock %}

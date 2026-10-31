@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.hypothesis/
+data/
+!data/.gitkeep
+node_modules/
+e2e/screenshots/
+e2e/test-results/
+.venv/

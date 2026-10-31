@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf_field with context %}
+{% block title %}{{ t('setup_title') }}{% endblock %}
+{% block content %}
+<div class="card narrow">
+<h1>{{ t('setup_title') }}</h1>
+<p class="muted">{{ t('setup_help') }}</p>
+<form method="post" action="/setup">{{ csrf_field() }}
+<label>{{ t('settings_company') }}<input name="company_name"></label>
+<label>{{ t('f_full_name') }}<input name="full_name" required></label>
+<label>{{ t('f_username') }}<input name="username" required autocomplete="username" dir="ltr"></label>
+<label>{{ t('f_password') }}<input name="password" type="password" required minlength="8" autocomplete="new-password"></label>
+<label>{{ t('f_password2') }}<input name="password2" type="password" required minlength="8" autocomplete="new-password"></label>
+<button class="primary">{{ t('btn_create') }}</button>
+</form></div>
+{% endblock %}

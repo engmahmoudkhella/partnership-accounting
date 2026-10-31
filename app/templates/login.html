@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf_field with context %}
+{% block title %}{{ t('login') }}{% endblock %}
+{% block content %}
+<div class="card narrow">
+<h1>{{ t('login') }}</h1>
+{% if error %}<div class="flash error" role="alert">{{ error }}</div>{% endif %}
+<form method="post" action="/login">{{ csrf_field() }}<input type="hidden" name="next" value="{{ next }}">
+<label>{{ t('f_username') }}<input name="username" required autocomplete="username" dir="ltr"></label>
+<label>{{ t('f_password') }}<input name="password" type="password" required autocomplete="current-password"></label>
+<button class="primary">{{ t('login') }}</button>
+</form></div>
+{% endblock %}

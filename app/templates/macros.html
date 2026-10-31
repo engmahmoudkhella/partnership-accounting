@@ -1,0 +1,4 @@
+{% macro m(v) %}<span class="num" dir="ltr">{{ money(v) }}</span>{% endmacro %}
+{% macro csrf_field() %}<input type="hidden" name="csrf" value="{{ csrf }}">{% endmacro %}
+{% macro status(s) %}<span class="status st-{{ s|lower }}">{{ t('status_' + s) }}</span>{% endmacro %}
+{% macro err(errors, key) %}{% if errors.get(key) %}<div class="field-error" role="alert">{{ errors[key] }}</div>{% endif %}{% endmacro %}

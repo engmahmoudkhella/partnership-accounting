@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf_field with context %}
+{% block title %}{{ t('nav_users') }}{% endblock %}
+{% block content %}
+<h1>{{ t('nav_users') }}</h1>
+<section class="card"><div class="scroll"><table data-testid="users-table"><thead><tr><th>{{ t('f_full_name') }}</th><th>{{ t('f_username') }}</th><th>{{ t('f_role') }}</th><th>{{ t('f_partner_id') }}</th><th>{{ t('col_status') }}</th><th></th></tr></thead><tbody>
+{% for u in users %}<tr class="{{ 'inactive' if not u.active }}"><td>{{ u.full_name }}</td><td dir="ltr">{{ u.username }}</td><td>{{ t('role_' + u.role) }}</td><td>{{ u.partner.name if u.partner else '' }}</td><td>{{ t('active') if u.active else t('inactive') }}</td>
+<td><a class="btn small" href="?edit={{ u.id }}">{{ t('btn_edit') }}</a>
+<form method="post" action="/users/{{ u.id }}/active" class="inline">{{ csrf_field() }}<input type="hidden" name="active" value="{{ '0' if u.active else '1' }}"><button class="small">{{ t('btn_deactivate') if u.active else t('btn_activate') }}</button></form>
+<form method="post" action="/users/{{ u.id }}/delete" class="inline confirm" data-confirm="{{ t('confirm_delete') }}">{{ csrf_field() }}<button class="danger small">{{ t('btn_delete') }}</button></form></td></tr>{% endfor %}
+</tbody></table></div><p class="muted">{{ t('help_users') }}</p></section>
+<form method="post" action="/users/save" class="card form" data-testid="user-form">{{ csrf_field() }}
+<h2>{{ t('btn_edit') if edit else t('btn_add') }}</h2>
+{% if edit %}<input type="hidden" name="id" value="{{ edit.id }}">{% endif %}
+<label>{{ t('f_full_name') }} *<input name="full_name" value="{{ edit.full_name if edit else '' }}" required></label>
+<label>{{ t('f_username') }} *<input name="username" value="{{ edit.username if edit else '' }}" required dir="ltr" pattern="[a-zA-Z0-9._-]{3,64}"></label>
+<label>{{ t('f_role') }}<select name="role">{% for r in roles %}<option value="{{ r }}" {{ 'selected' if edit and edit.role == r }}>{{ t('role_' + r) }}</option>{% endfor %}</select></label>
+<label>{{ t('f_partner_id') }}<select name="partner_id"><option value="">—</option>{% for p in partners %}<option value="{{ p.id }}" {{ 'selected' if edit and edit.partner_id == p.id }}>{{ p.name }}</option>{% endfor %}</select></label>
+<small class="muted">{{ t('help_user_partner') }}</small>
+<label>{{ t('f_lang') }}<select name="lang"><option value="ar" {{ 'selected' if edit and edit.lang=='ar' }}>العربية</option><option value="en" {{ 'selected' if edit and edit.lang=='en' }}>English</option></select></label>
+<label>{{ t('f_digits') }}<select name="digits"><option value="latn">1,234.50</option><option value="arab" {{ 'selected' if edit and edit.digits=='arab' }}>١٬٢٣٤٫٥٠</option></select></label>
+<label>{{ t('f_password') }}{% if not edit %} *{% endif %}<input type="password" name="password" minlength="8" autocomplete="new-password" {{ 'required' if not edit }}></label>
+<label>{{ t('f_password2') }}<input type="password" name="password2" minlength="8" autocomplete="new-password"></label>
+{% if edit %}<small class="muted">{{ t('help_password_keep') }}</small>{% endif %}
+<button class="primary">{{ t('btn_save') }}</button>
+</form>
+{% endblock %}
