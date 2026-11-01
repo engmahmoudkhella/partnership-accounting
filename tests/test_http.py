@@ -793,3 +793,21 @@ def test_stock_count_via_form(ready):
     assert "flash ok" in r.text and "محضر جرد" in r.text and "-2.5" in r.text and "22.50" in r.text
     r = c.get("/reports/trial")
     assert "✓" in r.text
+
+
+def test_project_shares_via_form(ready):
+    c = ready
+    ids = c.ids
+    r = c.get("/partners")
+    assert "نسب خاصة بمشروع" in r.text
+    p = ids["partners"]
+    # parcels-like project: contractor paid 40,000, Mahmoud 30,000, the two others 15,000 each
+    r = c.post("/project-shares/new", {"project_id": str(ids["project"]), "effective_date": "2026-10-10",
+                                       "mode": "amounts", f"pshare_{p[0]}": "٤٠٬٠٠٠", f"pshare_{p[1]}": "30000",
+                                       f"pshare_{p[2]}": "15000", f"pshare_{p[3]}": "15,000",
+                                       "note": "أبو مزيد دفع 40 ألف"}, page="/partners")
+    assert "flash ok" in r.text and "40%" in r.text and "30%" in r.text and "15%" in r.text
+    r = c.post("/project-shares/new", {"project_id": str(ids["project"]), "effective_date": "2026-10-20",
+                                       "mode": "percent", f"pshare_{p[0]}": "50", f"pshare_{p[1]}": "20"},
+               page="/partners")
+    assert "100% بالضبط" in r.text

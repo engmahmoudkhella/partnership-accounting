@@ -233,6 +233,37 @@
     });
     supDebtUpdate();
   }
+  // shares of one project: by amounts paid (exact proportion) or by percentages
+  var pst = document.getElementById("pshare-total");
+  function pshareUpdate() {
+    if (!pst) return;
+    var amounts = (document.querySelector("input[name=mode][value=amounts]") || {}).checked;
+    var ins = Array.prototype.slice.call(document.querySelectorAll(".pshare-in"));
+    var rs = ins.map(function (i) { return parse(i.value, amounts ? 2 : 4); });
+    var bad = rs.some(function (r) { return !!r.error; });
+    var ws = rs.map(function (r) { return r.minor !== undefined ? r.minor : 0n; });
+    var sum = ws.reduce(function (a, b) { return a + b; }, 0n);
+    ins.forEach(function (i, k) {
+      var out = document.querySelector(".pshare-pct[data-for='" + i.name.replace("pshare_", "") + "']");
+      if (!out) return;
+      out.classList.toggle("neg", !!rs[k].error);
+      out.textContent = rs[k].error ? rs[k].error : (amounts && sum > 0n && ws[k] > 0n ? "= " + fmtMinor((ws[k] * 2000000n + sum) / (2n * sum), 4) + "%" : "");
+    });
+    if (bad) { pst.textContent = "—"; pst.className = "num neg"; return; }
+    if (amounts) { pst.textContent = fmtMinor(sum, 2); pst.className = "num " + (sum > 0n ? "ok" : "neg"); }
+    else {
+      var n = BigInt(ws.filter(function (w) { return w > 0n; }).length), diff = sum - 1000000n;
+      if (diff < 0n) diff = -diff;
+      var ok = n > 0n && 2n * diff <= n;
+      pst.textContent = ok ? "100% ✓" : fmtMinor(sum, 4) + "%"; pst.className = "num " + (ok ? "ok" : "neg");
+    }
+  }
+  if (pst) {
+    document.querySelectorAll(".pshare-in, #pshares-form input[name=mode]").forEach(function (el) {
+      el.addEventListener("input", pshareUpdate); el.addEventListener("change", pshareUpdate);
+    });
+    pshareUpdate();
+  }
   // confirmation before destructive actions
   document.querySelectorAll("form.confirm").forEach(function (f) {
     f.addEventListener("submit", function (e) { if (!window.confirm(f.dataset.confirm)) e.preventDefault(); });

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import csrf_field with context %}
+{% from "macros.html" import csrf_field, m with context %}
 {% block title %}{{ t('nav_partners') }}{% endblock %}
 {% block content %}
 <h1>{{ t('nav_partners') }}</h1>
@@ -25,6 +25,25 @@
 <p class="note">{{ t('shares_total') }}: <b id="share-total" class="num" dir="ltr">0</b></p>
 <label>{{ t('f_note') }}<input name="note"></label>
 <button class="primary" data-testid="share-save">{{ t('btn_save') }}</button></form>
+{% endif %}
+</section>
+<section class="card" data-testid="project-shares"><h2>{{ t('pshares_title') }}</h2><p class="muted">{{ t('pshares_help') }}</p>
+{% for pr, pvs in pversions %}<h3>{{ pr.name }}</h3>{% for v in pvs %}<div class="share-version" data-testid="pshare-version"><b>{{ t('effective_from') }} <span class="num" dir="ltr">{{ fdate(v.effective_date) }}</span></b> {{ v.note }}
+<table><tbody>{% for ln in v.lines %}<tr><td>{{ (partners|selectattr('id','equalto',ln.partner_id)|first).name }}</td><td class="n"><span class="num" dir="ltr">{{ pct(version_pct['p%d' % v.id].get(ln.partner_id, 0)) }}</span></td>{% if v.mode == 'ratio' and ln.weight > 100 %}<td class="n muted">{{ m(ln.weight) }}</td>{% endif %}</tr>{% endfor %}</tbody></table>
+{% if user.role == 'admin' and loop.first %}<form method="post" action="/project-shares/{{ v.id }}/delete" class="inline confirm" data-confirm="{{ t('confirm_delete') }}">{{ csrf_field() }}<button class="danger small">{{ t('btn_delete') }}</button></form>{% endif %}</div>{% endfor %}
+{% else %}<p class="muted">{{ t('pshares_none') }}</p>{% endfor %}
+{% if user.role == 'admin' and partners and projects %}
+<form method="post" action="/project-shares/new" class="form" id="pshares-form" data-testid="pshares-form">{{ csrf_field() }}
+<h3>{{ t('pshares_new') }}</h3>
+<label>{{ t('f_project_id') }} *<select name="project_id" required data-testid="pshare-project"><option value="">—</option>{% for pr in projects %}<option value="{{ pr.id }}">{{ pr.name }}</option>{% endfor %}</select></label>
+<label>{{ t('effective_from') }} *<input type="date" name="effective_date" required data-testid="pshare-date"></label>
+<fieldset><legend>{{ t('pshares_mode') }}</legend>
+<label class="inline"><input type="radio" name="mode" value="amounts" checked data-testid="pshare-amounts"> {{ t('pshares_by_amounts') }}</label>
+<label class="inline"><input type="radio" name="mode" value="percent" data-testid="pshare-percent"> {{ t('pshares_by_percent') }}</label></fieldset>
+{% for p in partners %}<label>{{ p.name }}<input type="text" inputmode="decimal" dir="ltr" name="pshare_{{ p.id }}" class="pshare-in" data-testid="pshare-{{ p.id }}"><small class="pshare-pct muted" data-for="{{ p.id }}"></small></label>{% endfor %}
+<p class="note">{{ t('shares_total') }}: <b id="pshare-total" class="num" dir="ltr">0</b></p>
+<label>{{ t('f_note') }}<input name="note" placeholder="{{ t('pshares_note_ph') }}"></label>
+<button class="primary" data-testid="pshare-save">{{ t('btn_save') }}</button></form>
 {% endif %}
 </section>
 {% endblock %}

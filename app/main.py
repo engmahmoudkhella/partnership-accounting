@@ -43,6 +43,7 @@ from .models import (
     MonthSignoff,
     Partner,
     Project,
+    ProjectShareVersion,
     ShareVersion,
     User,
 )
@@ -899,8 +900,49 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         for v in versions:
             version_pct[v.id] = share_display_ppm([(ln.partner_id, ln.weight) for ln in v.lines if ln.weight > 0])
         refs = {p.id: ctx.L.partner_references(p.id) for p in partners}
+        projects = list(ctx.s.scalars(select(Project).order_by(Project.active.desc(), Project.id)))
+        pversions = []
+        for pr in projects:
+            pvs = list(reversed(ctx.L.project_share_versions(pr.id)))
+            for v in pvs:
+                version_pct["p%d" % v.id] = share_display_ppm([(ln.partner_id, ln.weight) for ln in v.lines
+                                                               if ln.weight > 0])
+            if pvs:
+                pversions.append((pr, pvs))
         return render(ctx, "partners.html", partners=partners, versions=versions, refs=refs,
-                      version_pct=version_pct)
+                      version_pct=version_pct, projects=projects, pversions=pversions)
+
+    @app.post("/project-shares/new")
+    @page
+    async def project_shares_new(ctx: Ctx, form):
+        require(ctx, "admin")
+        project = get_or_404(ctx, Project, N.parse_id(form.get("project_id")) or 0)
+        date = parse_date(form.get("effective_date", ""))
+        by_amounts = form.get("mode") == "amounts"
+        shares = {}
+        for p in ctx.s.scalars(select(Partner)):
+            raw = (form.get(f"pshare_{p.id}") or "").strip()
+            try:
+                if not raw:
+                    shares[p.id] = 0
+                elif by_amounts:
+                    shares[p.id] = N.parse_money(raw, allow_zero=True)
+                else:
+                    shares[p.id] = N.parse_percent(raw, allow_zero=True)
+            except N.NumberError as e:
+                raise BusinessError(e.code, **e.params) from None
+        ctx.L.create_project_share_version(project, date, shares, form.get("note", ""),
+                                           mode="ratio" if by_amounts else "percent")
+        flash(ctx.request, "ok", ctx.t("msg_saved"))
+        raise_commit_redirect(ctx, "/partners")
+
+    @app.post("/project-shares/{vid:int}/delete")
+    @page
+    async def project_shares_delete(ctx: Ctx, vid: int, form):
+        require(ctx, "admin")
+        ctx.L.delete_project_share_version(get_or_404(ctx, ProjectShareVersion, vid))
+        flash(ctx.request, "ok", ctx.t("msg_deleted"))
+        raise_commit_redirect(ctx, "/partners")
 
     @app.post("/partners/save")
     @page

@@ -23,7 +23,7 @@ from fractions import Fraction
 from math import lcm
 
 import bcrypt
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, not_, or_, select
 from sqlalchemy.orm import Session
 
 from .models import (
@@ -52,6 +52,8 @@ from .models import (
     Supplier,
     Item,
     DocumentItem,
+    ProjectShareLine,
+    ProjectShareVersion,
     ShareLine,
     ShareVersion,
     User,
@@ -350,7 +352,23 @@ class Ledger:
     def share_versions(self) -> list[ShareVersion]:
         return list(self.s.scalars(select(ShareVersion).order_by(ShareVersion.effective_date)))
 
-    def shares_at(self, d: dt.date) -> list[tuple[int, int]]:
+    def project_share_versions(self, project_id: int) -> list[ProjectShareVersion]:
+        return list(self.s.scalars(select(ProjectShareVersion).where(ProjectShareVersion.project_id == project_id)
+                                   .order_by(ProjectShareVersion.effective_date)))
+
+    def shares_at(self, d: dt.date, project_id: int | None = None) -> list[tuple[int, int]]:
+        """(partner_id, weight) in force on ``d``: the project's own shares if it has some by then,
+        otherwise the general shares."""
+        if project_id:
+            pv = self.s.scalar(select(ProjectShareVersion).where(
+                ProjectShareVersion.project_id == project_id, ProjectShareVersion.effective_date <= d)
+                .order_by(ProjectShareVersion.effective_date.desc()))
+            if pv is not None:
+                return [(ln.partner_id, ln.weight) for ln in sorted(pv.lines, key=lambda x: x.partner_id)
+                        if ln.weight > 0]
+        return self._general_shares_at(d)
+
+    def _general_shares_at(self, d: dt.date) -> list[tuple[int, int]]:
         """(partner_id, weight) in force on ``d``. Weights are relative; only their ratio matters."""
         v = self.s.scalar(select(ShareVersion).where(ShareVersion.effective_date <= d)
                           .order_by(ShareVersion.effective_date.desc()))
@@ -432,6 +450,78 @@ class Ledger:
         self.s.flush()
         self.audit("delete", "share_version", version.id, snap, None)
         self._clear_signoffs_from(version.effective_date)
+
+    def _normalize_shares(self, shares: dict[int, int], mode: str) -> tuple[dict[int, int], str]:
+        if mode not in ("percent", "ratio"):
+            raise BusinessError("err_invalid_choice")
+        partners = {p.id for p in self.s.scalars(select(Partner))}
+        if not partners:
+            raise BusinessError("err_no_partners")
+        for pid, w in shares.items():
+            if pid not in partners:
+                raise BusinessError("err_not_found")
+            if not isinstance(w, int) or w < 0:
+                raise BusinessError("err_number_negative")
+            if mode == "percent" and w > PPM_TOTAL:
+                raise BusinessError("err_percent_over_100")
+        total = sum(shares.values())
+        if mode == "percent" and total != PPM_TOTAL:
+            exact = self.exact_ratio_from_rounded_percents(shares)
+            if exact is None:
+                raise BusinessError("err_shares_sum", total=total)
+            shares, mode = exact, "ratio"
+        if mode == "ratio" and sum(shares.values()) <= 0:
+            raise BusinessError("err_ratio_zero")
+        return {pid: int(shares.get(pid, 0)) for pid in sorted(partners)}, mode
+
+    def create_project_share_version(self, project: Project, effective_date: dt.date, shares: dict[int, int],
+                                     note: str = "", mode: str = "percent") -> ProjectShareVersion:
+        """Shares for one project from a date. mode "ratio" also takes the amounts each partner paid
+        for the project (in agorot) as weights, so the split is exactly in proportion to them."""
+        self._require_role("admin")
+        if not isinstance(effective_date, dt.date):
+            raise BusinessError("err_date_required")
+        if project is None:
+            raise BusinessError("err_project_required")
+        weights, mode = self._normalize_shares(shares, mode)
+        if self.s.scalar(select(ProjectShareVersion.id).where(ProjectShareVersion.project_id == project.id,
+                                                              ProjectShareVersion.effective_date == effective_date)):
+            raise BusinessError("err_share_version_exists")
+        locks = self.locked_months()
+        if locks and month_of(effective_date) <= locks[-1]:
+            raise BusinessError("err_share_date_locked", month=locks[-1])
+        last = self._last_share_dependent_date()
+        if last is not None and effective_date <= last:
+            raise BusinessError("err_share_date_before_distribution", date=last.isoformat())
+        od = self.opening_date()
+        if od and effective_date < od:
+            raise BusinessError("err_share_date_before_opening", opening=od.isoformat())
+        v = ProjectShareVersion(project_id=project.id, effective_date=effective_date, note=note or "", mode=mode,
+                                created_by=self.user.id if self.user else None)
+        for pid, w in weights.items():
+            v.lines.append(ProjectShareLine(partner_id=pid, weight=w))
+        self.s.add(v)
+        self.s.flush()
+        self.audit("create", "project_shares", v.id, None, {"project_id": project.id, **self._share_snapshot(v)})
+        self._clear_signoffs_from(effective_date)
+        return v
+
+    def delete_project_share_version(self, v: ProjectShareVersion):
+        self._require_role("admin")
+        versions = self.project_share_versions(v.project_id)
+        if versions and versions[-1].id != v.id:
+            raise BusinessError("err_share_not_latest")
+        locks = self.locked_months()
+        if locks and month_of(v.effective_date) <= locks[-1]:
+            raise BusinessError("err_share_date_locked", month=locks[-1])
+        last = self._last_share_dependent_date()
+        if last is not None and v.effective_date <= last:
+            raise BusinessError("err_share_date_before_distribution", date=last.isoformat())
+        snap = {"project_id": v.project_id, **self._share_snapshot(v)}
+        self.s.delete(v)
+        self.s.flush()
+        self.audit("delete", "project_shares", v.id, snap, None)
+        self._clear_signoffs_from(v.effective_date)
 
     @staticmethod
     def _share_snapshot(v: ShareVersion) -> dict:
@@ -1139,7 +1229,8 @@ class Ledger:
         self.s.flush()
         if doc.doc_type != "CAPITAL_CALL":
             return
-        for pid, amt in allocate(doc.amount, self.shares_at(doc.date), tie_offset=doc.number).items():
+        for pid, amt in allocate(doc.amount, self.shares_at(doc.date, doc.project_id),
+                                 tie_offset=doc.number).items():
             doc.call_shares.append(CallShare(partner_id=pid, amount=amt))
         self.s.flush()
 
@@ -1837,25 +1928,51 @@ class Ledger:
 
         Profit is totalled per share period and each period total is split once, so rounding never
         builds up day after day: the parts always add up to net profit, and each partner is within
-        one agora of his exact share per period.
+        one agora of his exact share per period. A project with its own shares has its profit split
+        by those from their first date; before that, and for every other project, the general shares.
         """
-        versions = self.share_versions()
-        out: dict[int, int] = defaultdict(int)
-        for i, v in enumerate(versions):
+        def pl_sum(*conds):
             q = select(func.coalesce(func.sum(JournalLine.credit - JournalLine.debit), 0)).where(
-                JournalLine.account.in_(PL_CREDIT + PL_DEBIT), JournalLine.date >= v.effective_date)
-            if i + 1 < len(versions):
-                q = q.where(JournalLine.date < versions[i + 1].effective_date)
+                JournalLine.account.in_(PL_CREDIT + PL_DEBIT), *conds)
             if end:
                 q = q.where(JournalLine.date <= end)
             if start:
                 q = q.where(JournalLine.date >= start)
-            amount = int(self.s.scalar(q))
+            return int(self.s.scalar(q))
+
+        own: dict[int, list] = defaultdict(list)
+        for pv in self.s.scalars(select(ProjectShareVersion).order_by(ProjectShareVersion.project_id,
+                                                                       ProjectShareVersion.effective_date)):
+            own[pv.project_id].append(pv)
+        # lines that belong to a project period with its own shares are left out of the general split
+        excluded = [and_(JournalLine.project_id == pid, JournalLine.date >= pvs[0].effective_date)
+                    for pid, pvs in own.items()]
+        not_own = not_(or_(*excluded)) if excluded else None
+        out: dict[int, int] = defaultdict(int)
+        versions = self.share_versions()
+        for i, v in enumerate(versions):
+            conds = [JournalLine.date >= v.effective_date]
+            if i + 1 < len(versions):
+                conds.append(JournalLine.date < versions[i + 1].effective_date)
+            if not_own is not None:
+                conds.append(not_own)
+            amount = pl_sum(*conds)
             weights = [(ln.partner_id, ln.weight) for ln in sorted(v.lines, key=lambda x: x.partner_id)
                        if ln.weight > 0]
             if amount and weights:
                 for pid, part in allocate(amount, weights, tie_offset=i).items():
                     out[pid] += part
+        for pid, pvs in own.items():
+            for j, pv in enumerate(pvs):
+                conds = [JournalLine.project_id == pid, JournalLine.date >= pv.effective_date]
+                if j + 1 < len(pvs):
+                    conds.append(JournalLine.date < pvs[j + 1].effective_date)
+                amount = pl_sum(*conds)
+                weights = [(ln.partner_id, ln.weight) for ln in sorted(pv.lines, key=lambda x: x.partner_id)
+                           if ln.weight > 0]
+                if amount and weights:
+                    for p, part in allocate(amount, weights, tie_offset=j + pid).items():
+                        out[p] += part
         return dict(out)
 
     def partner_summary(self, as_of: dt.date | None = None) -> list[dict]:

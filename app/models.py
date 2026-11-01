@@ -84,6 +84,33 @@ class ShareLine(Base):
     __table_args__ = (UniqueConstraint("version_id", "partner_id"),)
 
 
+class ProjectShareVersion(Base):
+    """Shares that apply to ONE project from ``effective_date`` (e.g. a partner could not fund his whole
+    share of a parcels project and others covered it). Profit and capital calls of that project follow
+    these; every other project keeps the general shares."""
+
+    __tablename__ = "project_share_versions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"))
+    effective_date: Mapped[dt.date] = mapped_column(Date)
+    mode: Mapped[str] = mapped_column(String(10), default="percent")
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    lines = relationship("ProjectShareLine", cascade="all, delete-orphan", order_by="ProjectShareLine.partner_id")
+
+    __table_args__ = (UniqueConstraint("project_id", "effective_date"),)
+
+
+class ProjectShareLine(Base):
+    __tablename__ = "project_share_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    version_id: Mapped[int] = mapped_column(ForeignKey("project_share_versions.id", ondelete="CASCADE"))
+    partner_id: Mapped[int] = mapped_column(ForeignKey("partners.id"))
+    weight: Mapped[int] = mapped_column(Integer)
+    __table_args__ = (UniqueConstraint("version_id", "partner_id"),)
+
+
 # ---------------------------------------------------------- master records
 
 class Project(Base):
