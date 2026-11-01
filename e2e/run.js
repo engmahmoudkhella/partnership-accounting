@@ -70,6 +70,9 @@ async function waitForServer() {
     check((await page.locator("[data-testid=partners-table] tbody tr").count()) === 4, "4 partners listed");
     await page.fill("[data-testid=share-date]", "2026-01-01");
     const shareInputs = page.locator(".share-in");
+    await shareInputs.nth(1).fill("20.1");
+    check((await page.locator(".share-pct").nth(1).textContent()).includes("بلا كسور"), "decimal in ratio mode is flagged, not counted as zero");
+    check((await page.textContent("#share-total")).trim() === "—", "total hidden while a field is invalid");
     const vals = ["٣", "١", "١", "١"];
     for (let i = 0; i < 4; i++) await shareInputs.nth(i).fill(vals[i]);
     const pctText = await page.locator(".share-pct").first().textContent();

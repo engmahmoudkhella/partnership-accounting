@@ -108,13 +108,24 @@
     if (st) {
       var ratio = (document.querySelector("input[name=mode]:checked") || {}).value === "ratio";
       var ins = Array.prototype.slice.call(document.querySelectorAll(".share-in"));
-      var ws = ins.map(function (i) { var r = parse(i.value, ratio ? 0 : 4); return r.minor !== undefined ? r.minor : 0n; });
+      var rs = ins.map(function (i) {
+        var r = parse(i.value, ratio ? 0 : 4);
+        // whole numbers only in ratio mode: say so instead of silently counting the field as zero
+        if (ratio && r.error && /[.٫]/.test(i.value))
+          r = {error: AR ? "في «نسبة بأعداد صحيحة» اكتب أعداداً بلا كسور (مثل 3 أو 1)، أو اختر «نسبة مئوية»" : "Ratio mode takes whole numbers (e.g. 3 or 1); for decimals choose percentages"};
+        return r;
+      });
+      var bad = rs.some(function (r) { return !!r.error; });
+      var ws = rs.map(function (r) { return r.minor !== undefined ? r.minor : 0n; });
       var sum = ws.reduce(function (a, b) { return a + b; }, 0n);
       ins.forEach(function (i, k) {
         var out = document.querySelector(".share-pct[data-for='" + i.name.replace("share_", "") + "']");
-        if (out) out.textContent = sum > 0n ? "= " + fmtMinor((ws[k] * 2000000n + sum) / (2n * sum), 4) + "%" : "";
+        if (!out) return;
+        out.classList.toggle("neg", !!rs[k].error);
+        out.textContent = rs[k].error ? rs[k].error : (sum > 0n && !bad ? "= " + fmtMinor((ws[k] * 2000000n + sum) / (2n * sum), 4) + "%" : "");
       });
-      if (ratio) { st.textContent = fmtMinor(sum, 0); st.className = "num " + (sum > 0n ? "ok" : "neg"); }
+      if (bad) { st.textContent = "—"; st.className = "num neg"; }
+      else if (ratio) { st.textContent = fmtMinor(sum, 0); st.className = "num " + (sum > 0n ? "ok" : "neg"); }
       else { st.textContent = fmtMinor(sum, 4) + "%"; st.className = "num " + (sum === 1000000n ? "ok" : "neg"); }
     }
   }
