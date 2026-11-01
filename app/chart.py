@@ -306,4 +306,4 @@ def voucher_kind(doc: Document) -> str:
         return "issue"
     if t in ("CAPITAL_CALL", "PRODUCTION"):
         return "memo"
-    return "journal"  # OPENING, TRANSFER, CAPITAL_TRANSFER, ASSET_DISPOSAL
+    return "journal"  # OPENING, TRANSFER, CAPITAL_TRANSFER, ASSET_DISPOSAL, FX_REVALUATION

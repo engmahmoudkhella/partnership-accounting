@@ -45,6 +45,7 @@ from .models import (
     Project,
     ProjectShareVersion,
     Quote,
+    CurrencyRate,
     ShareVersion,
     User,
 )
@@ -652,7 +653,11 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         if doc_type in ("EXPENSE", "ASSET_PURCHASE", "PURCHASE"):
             extra["threshold"] = ctx.L.approval_threshold
         if doc_type in FX_TYPES:
-            extra["usd_rate"] = N.rate_input_value(ctx.L.usd_rate())
+            extra["usd_rate"] = N.rate_input_value(ctx.L.rate_on(None))  # last typed: fallback
+            extra["rates"] = [[r.date.isoformat(), N.rate_input_value(r.rate)]
+                              for r in ctx.s.scalars(select(CurrencyRate).order_by(CurrencyRate.date))]
+        if doc_type == "FX_REVALUATION":
+            extra["fx_preview"] = True
         if doc_type == "SUPPLIER_PAYMENT":
             extra["supplier_debts"] = {sp.id: ctx.L.supplier_owed(sp.id) for sp in ctx.s.scalars(select(Supplier))}
         if doc_type in ("STOCK_ISSUE", "PRODUCTION", "STOCK_COUNT", "STOCK_RETURN"):
@@ -1200,6 +1205,39 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         return render_commercial(ctx, "claim", customer=c, as_of=as_of, claim=claim, show_all=show_all, cur=cur,
                                  currencies=currencies, total=claim["balance"],
                                  words=N.amount_in_words(max(claim["balance"], 0), ctx.lang, cur))
+
+    # ------------------------------------------------------------ currency rates & revaluation
+
+    @app.get("/rates", response_class=HTMLResponse)
+    @page
+    async def rates_page(ctx: Ctx):
+        require(ctx)
+        q = ctx.request.query_params
+        rows = list(ctx.s.scalars(select(CurrencyRate).order_by(CurrencyRate.date.desc())))
+        d = opt_date(q.get("date")) or today_fn()
+        try:
+            rate = N.parse_rate(q["rate"]) if q.get("rate") else ctx.L.rate_on(d)
+        except N.NumberError:
+            rate = ctx.L.rate_on(d)
+        preview = ctx.L.fx_revaluation_preview(d, rate) if rate else []
+        return render(ctx, "rates.html", rows=rows, d=d, sel_rate=rate, preview=preview, names=_names(ctx),
+                      today_rate=ctx.L.rate_on(today_fn()))
+
+    @app.post("/rates/save")
+    @page
+    async def rates_save(ctx: Ctx, form):
+        require(ctx, "admin", "accountant")
+        ctx.L.save_rate(parse_date(form.get("date", "")), N.parse_rate(form.get("rate", "")))
+        flash(ctx.request, "ok", ctx.t("msg_saved"))
+        raise_commit_redirect(ctx, "/rates")
+
+    @app.post("/rates/{rid:int}/delete")
+    @page
+    async def rates_delete(ctx: Ctx, rid: int, form):
+        require(ctx, "admin", "accountant")
+        ctx.L.delete_rate(get_or_404(ctx, CurrencyRate, rid))
+        flash(ctx.request, "ok", ctx.t("msg_deleted"))
+        raise_commit_redirect(ctx, "/rates")
 
     # ------------------------------------------------------------ monthly contracts
 

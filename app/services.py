@@ -40,6 +40,7 @@ from .models import (
     ContractRun,
     Quote,
     QuoteLine,
+    CurrencyRate,
     Customer,
     Document,
     JournalLine,
@@ -420,11 +421,63 @@ class Ledger:
                 "balance": invoiced - paid_total, "open": [r for r in dues if r["remaining"]]}
 
     def usd_rate(self) -> int:
-        """The current dollar rate kept in the settings (x10,000); 0 when not set."""
+        """The current dollar rate: today's from the rates table, else the last rate typed (x10,000); 0 if none."""
+        return self.rate_on(self.today)
+
+    def rate_on(self, d: dt.date | None) -> int:
+        """The dollar rate of a date: the rates table on that day or the latest day before it,
+        else the last rate typed in a document."""
+        if d is not None:
+            r = self.s.scalar(select(CurrencyRate.rate).where(CurrencyRate.date <= d)
+                              .order_by(CurrencyRate.date.desc()).limit(1))
+            if r:
+                return int(r)
         try:
             return int(self.get_setting("usd_rate", "0") or 0)
         except ValueError:
             return 0
+
+    def save_rate(self, d: dt.date, rate: int) -> CurrencyRate:
+        self._require_role("admin", "accountant")
+        if not isinstance(d, dt.date):
+            raise BusinessError("err_date_required")
+        if not isinstance(rate, int) or rate <= 0:
+            raise BusinessError("err_rate_required")
+        row = self.s.scalar(select(CurrencyRate).where(CurrencyRate.date == d))
+        before = {"date": d.isoformat(), "rate": row.rate} if row else None
+        if row is None:
+            row = CurrencyRate(date=d, rate=rate)
+            self.s.add(row)
+        row.rate = rate
+        self.s.flush()
+        self.audit("update" if before else "create", "currency_rate", row.id, before,
+                   {"date": d.isoformat(), "rate": rate})
+        return row
+
+    def delete_rate(self, row: CurrencyRate):
+        self._require_role("admin", "accountant")
+        self.audit("delete", "currency_rate", row.id, {"date": row.date.isoformat(), "rate": row.rate}, None)
+        self.s.delete(row)
+        self.s.flush()
+
+    def fx_revaluation_preview(self, d: dt.date, rate: int, exclude_doc_id: int | None = None) -> list[dict]:
+        """Every dollar balance (accounts and customers) on ``d``: dollars held, shekel value in the books,
+        value at ``rate`` and the difference to book (Al-Aseel: احتساب فروق العملة على الحسابات)."""
+        out = []
+        for account, key in ((CASH, "money_account_id"), (AR, "customer_id")):
+            col = getattr(JournalLine, key)
+            rows = self.s.execute(
+                select(col, func.sum(JournalLine.debit - JournalLine.credit), func.sum(JournalLine.fx))
+                .where(JournalLine.account == account, JournalLine.currency == "USD", JournalLine.date <= d,
+                       JournalLine.document_id != (exclude_doc_id or 0))
+                .group_by(col).order_by(col)).all()
+            for k, ils, fx in rows:
+                ils, fx = int(ils), int(fx)
+                value = convert(fx, rate)
+                if value != ils:
+                    out.append({"account": account, "key": key, "id": k, "fx": fx, "book": ils, "value": value,
+                                "diff": value - ils})
+        return out
 
     def contract_runs_done(self, c: Contract) -> int:
         return len(c.runs)
@@ -452,7 +505,7 @@ class Ledger:
                         doc = self.create_document("INVOICE", d, {
                             "customer_id": c.customer_id, "project_id": c.project_id, "quantity": 1000,
                             "unit_price": c.amount, "description": desc, "currency": c.currency or "",
-                            "rate": self.usd_rate() if c.currency else None})
+                            "rate": None})
                     else:
                         doc = self.create_document("EXPENSE", d, {
                             "category": c.category, "project_id": c.project_id, "amount": c.amount,
@@ -1014,6 +1067,7 @@ class Ledger:
         "STOCK_ISSUE": ("project_id", "category"),
         "STOCK_COUNT": ("project_id",),
         "STOCK_RETURN": ("project_id",),
+        "FX_REVALUATION": (),
     }
     _EMPTY = {"amount": 0, "fee": 0, "quantity": 0, "unit_price": 0, "category": "", "supplier": "", "paid": 0}
     _ALL_FIELDS = ("partner_id", "partner2_id", "project_id", "customer_id", "money_account_id",
@@ -1056,10 +1110,15 @@ class Ledger:
         def rate():
             r = data.get("rate")
             if not isinstance(r, int) or r <= 0:
+                r = self.rate_on(doc.date)  # not typed: the day's rate from the rates table
+            if not r:
                 raise BusinessError("err_rate_required")
             return r
 
         r = data.get("rate")
+        if t == "FX_REVALUATION":
+            doc.currency, doc.rate = "USD", rate()
+            return
         if isinstance(r, int) and r > 0 and self.user is not None:
             row = self.s.get(Setting, "usd_rate")  # remembered as the default for the next dollar entry
             if row:
@@ -1291,10 +1350,26 @@ class Ledger:
         elif t == "STOCK_COUNT":
             project(doc.project_id)
             self._check_items(doc, priced=False, allow_zero=True)
+        elif t == "FX_REVALUATION":
+            rows = self.fx_revaluation_preview(doc.date, doc.rate, exclude_doc_id=doc.id)
+            if not rows:
+                raise BusinessError("err_fx_nothing")
+            doc.amount = sum(abs(r["diff"]) for r in rows)
 
     # ---------------------------------------------------------------- lines
 
     def _lines_for(self, doc: Document) -> list[Line]:
+        if doc.doc_type == "FX_REVALUATION":
+            L = []
+            for r in self.fx_revaluation_preview(doc.date, doc.rate, exclude_doc_id=doc.id):
+                kw = {r["key"]: r["id"], "currency": "USD", "fx": 0}  # value changes, dollars do not
+                if r["diff"] > 0:
+                    L.append(Line(r["account"], debit=r["diff"], **kw))
+                    L.append(Line(GAIN, credit=r["diff"], category="fx"))
+                else:
+                    L.append(Line(r["account"], credit=-r["diff"], **kw))
+                    L.append(Line(LOSS, debit=-r["diff"], category="fx"))
+            return L
         L = self._lines_for_shekels(doc)
         if doc.currency == "USD" or doc.doc_type == "OPENING":
             L = self._fx_lines(doc, L)

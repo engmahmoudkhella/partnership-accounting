@@ -10,11 +10,23 @@
   const cur = name => { const el = form.querySelector('select[name="' + name + '"]'); if (!el || el.closest('label') && el.closest('label').offsetParent === null) return ''; const o = el.options[el.selectedIndex]; return o ? (o.dataset.cur || '') : ''; };
   const tag = (f, c) => form.querySelectorAll('.cur-tag[data-for="' + f + '"]').forEach(e => e.textContent = c === 'USD' ? '($)' : '');
   const show = (sel, on) => box.querySelectorAll(sel).forEach(e => e.hidden = !on);
+  const rateEl = form.querySelector('#fx-rate'), rates = JSON.parse(rateEl.dataset.rates || '[]');
+  function dayRate(){
+    const d = (form.querySelector('[name=date]') || {}).value || '';
+    let r = '', src = '';
+    for (const [rd, rv] of rates) { if (rd <= d) { r = rv; src = rd; } }
+    if (!r) r = rateEl.dataset.fallback || '';
+    rateEl.placeholder = r || '3.65';
+    form.querySelector('#fx-rate-src').textContent = rateEl.value ? '' : (r ? (src ? {{ t('fx_rate_from_table')|tojson }} + ' ' + src : {{ t('fx_rate_last')|tojson }}) : '');
+    return r;
+  }
   function upd(){
-    const rate = toN(form.querySelector('#fx-rate').value);
+    const auto = dayRate();
+    const rate = toN(rateEl.value) || toN(auto);
     const field = type === 'PURCHASE' ? 'paid' : type === 'INVOICE' ? 'unit_price' : 'amount';
     let on = false, eq = '';
-    if (type === 'INVOICE') {
+    if (type === 'FX_REVALUATION') { box.hidden = false; }
+    else if (type === 'INVOICE') {
       on = form.querySelector('#fx-currency').value === 'USD'; box.hidden = false; show('.fx-rate, .fx-equiv', on);
       tag('unit_price', on ? 'USD' : '');
       if (on && rate) { const tot = toN((form.querySelector('[name=quantity]')||{}).value) * toN((form.querySelector('[name=unit_price]')||{}).value); eq = L.usd + fmt(tot) + ' ' + L.eq + ' ' + L.ils + fmt(tot * rate); }
@@ -102,8 +114,8 @@
 <fieldset class="fxbox" id="fxbox" data-type="{{ doc_type }}" data-testid="fxbox">
   <legend>{{ t('fx_title') }}</legend>
   {% if doc_type == 'INVOICE' %}<label>{{ t('f_currency') }}<select name="currency" id="fx-currency" data-testid="f-currency"><option value="">{{ t('cur_ILS') }}</option><option value="USD" {{ 'selected' if values.get('currency') == 'USD' }}>{{ t('cur_USD') }}</option></select></label>{% endif %}
-  <p class="muted fx-help">{{ t('fx_help_' + ('transfer' if doc_type == 'TRANSFER' else 'invoice' if doc_type == 'INVOICE' else 'money')) }}</p>
-  <label class="fx-rate">{{ t('f_rate') }} *<input type="text" inputmode="decimal" autocomplete="off" name="rate" id="fx-rate" dir="ltr" value="{{ values.get('rate') or extra.get('usd_rate', '') }}" placeholder="3.65" data-testid="f-rate"></label>
+  <p class="muted fx-help">{{ t('fx_help_' + ('transfer' if doc_type == 'TRANSFER' else 'invoice' if doc_type == 'INVOICE' else 'reval' if doc_type == 'FX_REVALUATION' else 'money')) }}</p>
+  <label class="fx-rate">{{ t('f_rate') }}<input type="text" inputmode="decimal" autocomplete="off" name="rate" id="fx-rate" dir="ltr" value="{{ values.get('rate', '') }}" placeholder="{{ extra.get('usd_rate') or '3.65' }}" data-rates='{{ extra.get("rates", [])|tojson }}' data-fallback="{{ extra.get('usd_rate', '') }}" data-testid="f-rate"><small class="muted" id="fx-rate-src"></small></label>
   {{ err(errors, 'rate') }}
   {% if doc_type == 'TRANSFER' %}<label class="fx-amount2">{{ t('f_amount2') }} * <b class="cur-tag" data-for="amount2"></b><input type="text" inputmode="decimal" autocomplete="off" name="amount2" id="fx-amount2" dir="ltr" class="numin" data-kind="money" value="{{ values.get('amount2', '') }}" data-testid="f-amount2"><small class="preview" data-for="amount2"></small></label>
   {{ err(errors, 'amount2') }}{% endif %}

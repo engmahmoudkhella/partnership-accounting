@@ -166,17 +166,13 @@ def test_dollar_receipt_invoice_and_claim_through_the_web(ready):
     inv = s.scalar(select(Document).where(Document.doc_type == "INVOICE"))
     assert inv.amount == 5_550_000 and inv.fx_amount == 1_500_000
     s.close()
-    # missing rate is reported on the field
+    # no rate typed and no rates table: the last rate typed (3.7) is used
     r = c.post("/documents/new/RECEIPT", {"date": "2026-10-25", "customer_id": str(cid),
                                           "money_account_id": str(usd_id), "amount": "4000"},
                page="/documents/new/RECEIPT")
-    assert r.status_code == 422 and "سعر صرف" in r.text
-    r = c.post("/documents/new/RECEIPT", {"date": "2026-10-25", "customer_id": str(cid),
-                                          "money_account_id": str(usd_id), "amount": "4000", "rate": "3.6"},
-               page="/documents/new/RECEIPT")
     assert "flash ok" in r.text
-    # the rate is remembered for the next form
-    assert 'value="3.6"' in c.get("/documents/new/EXPENSE").text
+    # and it is offered on the next form
+    assert 'placeholder="3.7"' in c.get("/documents/new/EXPENSE").text
     r = c.get(f"/documents/{inv.id}/invoice")
     assert "$15,000.00" in r.text and "دولار أمريكي" in r.text and 'data-testid="cm-remaining">$11,000.00' in r.text
     r = c.get(f"/reports/customer/{cid}/claim?date=2026-10-31")
@@ -188,6 +184,75 @@ def test_dollar_receipt_invoice_and_claim_through_the_web(ready):
     rec = s.scalar(select(Document).where(Document.doc_type == "RECEIPT"))
     s.close()
     r = c.get(f"/documents/{rec.id}/edit")
-    assert 'value="4000.00"' in r.text and 'value="3.6"' in r.text
+    assert 'value="4000.00"' in r.text and 'value="3.7"' in r.text
     r = c.get(f"/documents/{rec.id}/print")
     assert "$4,000.00" in r.text and "دولار" in r.text
+
+
+# ------------------------------------------------------------------ rates table and revaluation (Al-Aseel)
+
+def test_documents_take_the_rate_of_their_date(opened):
+    w = opened
+    L, usd = usd_world(w)
+    L.save_rate(dt.date(2026, 10, 1), 37_000)
+    L.save_rate(dt.date(2026, 10, 15), 36_000)
+    a = doc(L, "CONTRIBUTION", dt.date(2026, 10, 10), partner_id=w.mahmoud.id, money_account_id=usd.id, amount=100_000)
+    b = doc(L, "CONTRIBUTION", dt.date(2026, 10, 20), partner_id=w.mahmoud.id, money_account_id=usd.id, amount=100_000)
+    c = doc(L, "CONTRIBUTION", dt.date(2026, 10, 20), partner_id=w.mahmoud.id, money_account_id=usd.id,
+            amount=100_000, rate=35_500)  # a typed rate wins
+    assert (a.rate, a.amount) == (37_000, 370_000)
+    assert (b.rate, b.amount) == (36_000, 360_000)
+    assert c.rate == 35_500
+    L.save_rate(dt.date(2026, 10, 15), 36_500)  # correcting a day's rate
+    assert L.rate_on(dt.date(2026, 10, 31)) == 36_500
+    assert fails(w, L.save_rate, dt.date(2026, 10, 2), 0) == "err_rate_required"
+
+
+def test_revaluation_brings_dollar_balances_to_the_day_rate(opened):
+    w = opened
+    L, usd = usd_world(w)
+    doc(L, "CONTRIBUTION", D, partner_id=w.mahmoud.id, money_account_id=usd.id, amount=1_000_000, rate=40_000)
+    doc(L, "INVOICE", D, customer_id=w.org.id, project_id=w.kitchen.id, quantity=1000, unit_price=500_000,
+        currency="USD", rate=40_000)
+    end = dt.date(2026, 10, 31)
+    rows = L.fx_revaluation_preview(end, 38_000)
+    assert {(r["account"], r["diff"]) for r in rows} == {(CASH, -200_000), (AR, -100_000)}
+    rv = doc(L, "FX_REVALUATION", end, rate=38_000)
+    assert rv.amount == 300_000
+    assert L.balance(CASH, money_account_id=usd.id) == 3_800_000 and L.fx_balance(usd.id) == 1_000_000
+    assert L.balance(AR, customer_id=w.org.id) == 1_900_000
+    assert L.balance(LOSS) == 300_000
+    assert L.fx_revaluation_preview(end, 38_000) == []
+    assert fails(w, doc, L, "FX_REVALUATION", end, rate=38_000) == "err_fx_nothing"
+    # after revaluation, paying the dollars out at 3.80 makes no further difference
+    rec = doc(L, "RECEIPT", end, customer_id=w.org.id, money_account_id=usd.id, amount=500_000, rate=38_000)
+    assert {ln.account for ln in rec.lines} == {CASH, AR}
+    L.check_invariants()
+    assert L.trial_balance()["sheet_ok"]
+
+
+def test_rates_page_and_revaluation_through_the_web(ready):
+    c = ready
+    c.post("/master/money_account/save", {"name": "دولار", "kind": "bank", "currency": "USD"},
+           page="/master/money_account")
+    from app.models import MoneyAccount
+    s = c.db()
+    usd_id = s.scalar(select(MoneyAccount.id).where(MoneyAccount.currency == "USD"))
+    s.close()
+    r = c.post("/rates/save", {"date": "2026-10-01", "rate": "٣٫٧"}, page="/rates")
+    assert "flash ok" in r.text and "3.7" in r.text
+    # no rate typed: the day's rate is used
+    r = c.post("/documents/new/CONTRIBUTION", {"date": "2026-10-05", "partner_id": str(c.ids["partners"][1]),
+                                               "money_account_id": str(usd_id), "amount": "1000"},
+               page="/documents/new/CONTRIBUTION")
+    assert "flash ok" in r.text and "3,700.00" in r.text
+    r = c.get("/rates?date=2026-10-31&rate=3.5")
+    assert 'data-testid="reval-preview"' in r.text and "-200.00" in r.text
+    r = c.post("/documents/new/FX_REVALUATION", {"date": "2026-10-31", "rate": "3.5"}, page="/rates")
+    assert "flash ok" in r.text
+    s = c.db()
+    rv = s.scalar(select(Document).where(Document.doc_type == "FX_REVALUATION"))
+    assert rv.amount == 20_000 and rv.status == "POSTED"
+    s.close()
+    assert "قيد تسوية فروق العملة" in c.get(f"/documents/{rv.id}").text
+    assert c.get(f"/documents/{rv.id}/print").status_code == 200

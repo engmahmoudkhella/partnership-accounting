@@ -212,6 +212,7 @@ DOC_TYPES = (
     "STOCK_ISSUE",
     "STOCK_COUNT",
     "STOCK_RETURN",
+    "FX_REVALUATION",
 )
 # document types that never create ledger lines
 MEMO_TYPES = ("CAPITAL_CALL", "PRODUCTION")
@@ -482,3 +483,13 @@ class QuoteLine(Base):
     quantity: Mapped[int] = mapped_column(Integer)  # milli
     unit_price: Mapped[int] = mapped_column(Integer)
     amount: Mapped[int] = mapped_column(Integer)
+
+
+class CurrencyRate(Base):
+    """The dollar rate of a day (shekels per dollar x 10,000), like Al-Aseel's currency rates file.
+    A document uses the rate of its date, or the latest one before it."""
+    __tablename__ = "currency_rates"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    date: Mapped[dt.date] = mapped_column(Date, unique=True, index=True)
+    rate: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)

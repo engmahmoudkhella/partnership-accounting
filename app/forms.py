@@ -37,6 +37,7 @@ FORM_FIELDS: dict[str, list[tuple[str, str, bool]]] = {
     "STOCK_ISSUE": [("project_id", "project", True), ("category", "issue_reason", False), ("items", "items", True)],
     "STOCK_RETURN": [("project_id", "project", True), ("items", "items", True)],
     "STOCK_COUNT": [("project_id", "project", False), ("items", "items", True)],
+    "FX_REVALUATION": [],
 }
 MAX_ITEM_ROWS = 40
 
@@ -45,7 +46,7 @@ ATTACHMENT_TYPES = ("EXPENSE", "ASSET_PURCHASE", "INVOICE", "RECEIPT", "CONTRIBU
 
 # documents that can be in dollars (a dollar money account, or a dollar invoice)
 FX_TYPES = ("CONTRIBUTION", "EXPENSE", "ASSET_PURCHASE", "ASSET_DISPOSAL", "RECEIPT", "DISTRIBUTION",
-            "SUPPLIER_PAYMENT", "PURCHASE", "TRANSFER", "INVOICE")
+            "SUPPLIER_PAYMENT", "PURCHASE", "TRANSFER", "INVOICE", "FX_REVALUATION")
 
 # label key for a field, per document type when it differs
 FIELD_LABELS = {
