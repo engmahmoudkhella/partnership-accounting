@@ -173,3 +173,25 @@ def test_master_rules_for_items_and_suppliers(kitchen):
     assert code(L.set_master_active, "item", w.rice, False) == "err_item_in_stock"
     assert code(L.delete_master, "item", w.rice) == "err_in_use_deactivate"
     assert code(L.save_master, "item", None, name="ملح", unit="", category="food") == "err_unit_required"
+
+
+def test_expense_on_credit_to_a_supplier_then_paid(kitchen):
+    """The cook is owed 3,000 for 3,000 meals; 1,000 paid by a partner, the rest paid later from the box."""
+    w = kitchen
+    L = w.L
+    cook = L.save_master("supplier", None, name="محمد علي (طباخ)")
+    doc = L.create_document("EXPENSE", D(3), {"amount": 300_000, "category": "wages", "project_id": w.kitchen.id,
+                                              "supplier_id": cook.id})
+    w.s.commit()
+    assert L.balance(AP, supplier_id=cook.id) == 300_000 and L.balance(EXP, project_id=w.kitchen.id) == 300_000
+    from app import chart
+    assert chart.voucher_kind(doc) == "journal"
+    L.create_document("SUPPLIER_PAYMENT", D(3), {"supplier_id": cook.id, "amount": 100_000,
+                                                 "paid_by_partner_id": w.mahmoud.id})
+    L.create_document("SUPPLIER_PAYMENT", D(4), {"supplier_id": cook.id, "amount": 200_000,
+                                                 "money_account_id": w.cash.id})
+    w.s.commit()
+    assert L.balance(AP, supplier_id=cook.id) == 0
+    # one pay source only
+    assert code(L.create_document, "EXPENSE", D(4), {"amount": 1, "category": "wages", "supplier_id": cook.id,
+                                                     "money_account_id": w.cash.id}) == "err_pay_source"

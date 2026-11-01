@@ -58,6 +58,8 @@
     var v = (fs.querySelector("input[name=pay_source]:checked") || {}).value || "account";
     fs.querySelector(".ps-account").style.display = v === "account" ? "" : "none";
     fs.querySelector(".ps-partner").style.display = v === "partner" ? "" : "none";
+    var cr = fs.querySelector(".ps-credit");
+    if (cr) cr.style.display = v === "credit" ? "" : "none";
   }
   document.querySelectorAll("input[name=pay_source]").forEach(function (r) { r.addEventListener("change", paysource); });
   // monthly contract form: show the fields of the chosen type

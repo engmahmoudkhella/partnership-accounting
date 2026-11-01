@@ -17,7 +17,7 @@ FORM_FIELDS: dict[str, list[tuple[str, str, bool]]] = {
     "CAPITAL_TRANSFER": [("partner_id", "partner", True), ("partner2_id", "partner", True),
                          ("amount", "money", True)],
     "EXPENSE": [("category", "category", True), ("project_id", "project", False), ("amount", "money", True),
-                ("pay_source", "paysource", True), ("supplier", "text", False)],
+                ("pay_source", "paysource_credit", True), ("supplier", "text", False)],
     "ASSET_PURCHASE": [("asset_name", "text", True), ("project_id", "project", False),
                        ("amount", "money", True), ("pay_source", "paysource", True), ("supplier", "text", False)],
     "ASSET_DISPOSAL": [("asset_id", "asset", True), ("amount", "money0", True),
@@ -130,7 +130,12 @@ def parse_document_form(doc_type: str, form) -> tuple[dict, dict, dict]:
                 data["items"] = rows
             elif kind == "paysource_opt" and not data.get("paid"):
                 data["money_account_id"] = data["paid_by_partner_id"] = None
-            elif kind in ("paysource", "paysource_opt"):
+            elif kind == "paysource_credit" and form.get("pay_source") == "credit":
+                data["supplier_id"] = _int_or_none(form.get("supplier_id"))
+                data["money_account_id"] = data["paid_by_partner_id"] = None
+                if data["supplier_id"] is None:
+                    raise NumberError("err_supplier_required")
+            elif kind in ("paysource", "paysource_opt", "paysource_credit"):
                 src = form.get("pay_source", "account")
                 if src == "partner":
                     data["paid_by_partner_id"] = _int_or_none(form.get("paid_by_partner_id"))

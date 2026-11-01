@@ -745,7 +745,8 @@ class Ledger:
         "CONTRIBUTION": ("partner_id", "money_account_id", "amount", "capital_call_id"),
         "CAPITAL_CALL": ("amount", "project_id"),
         "CAPITAL_TRANSFER": ("partner_id", "partner2_id", "amount"),
-        "EXPENSE": ("amount", "category", "project_id", "money_account_id", "paid_by_partner_id", "supplier"),
+        "EXPENSE": ("amount", "category", "project_id", "money_account_id", "paid_by_partner_id", "supplier",
+                    "supplier_id"),
         "ASSET_PURCHASE": ("amount", "project_id", "money_account_id", "paid_by_partner_id", "supplier"),
         "ASSET_DISPOSAL": ("asset_id", "amount", "money_account_id"),
         "INVOICE": ("customer_id", "project_id", "quantity", "unit_price"),
@@ -843,9 +844,13 @@ class Ledger:
             project(doc.project_id)
             has_acc = doc.money_account_id is not None
             has_partner = doc.paid_by_partner_id is not None
-            if has_acc == has_partner:
+            on_credit = t == "EXPENSE" and doc.supplier_id is not None
+            if has_acc + has_partner + on_credit != 1:
                 raise BusinessError("err_pay_source")
-            if has_acc:
+            if on_credit:
+                # not paid yet: owed to the supplier (a cook, a driver...), settled later by a payment
+                self._active_ref(Supplier, doc.supplier_id, o.get("supplier_id"), "err_supplier_inactive")
+            elif has_acc:
                 money(doc.money_account_id)
             else:
                 partner(doc.paid_by_partner_id)
@@ -968,6 +973,8 @@ class Ledger:
                 L.append(Line(FA, debit=doc.amount, asset_id=doc.asset_id, project_id=doc.project_id))
             if doc.money_account_id is not None:
                 L.append(Line(CASH, credit=doc.amount, money_account_id=doc.money_account_id))
+            elif doc.supplier_id is not None:
+                L.append(Line(AP, credit=doc.amount, supplier_id=doc.supplier_id))
             else:
                 L.append(Line(CAP, credit=doc.amount, partner_id=doc.paid_by_partner_id))
         elif t == "ASSET_DISPOSAL":

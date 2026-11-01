@@ -517,8 +517,10 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
                     v[f"qty_{n}"] = N.qty_input_value(it.quantity)
                     if it.unit_price:
                         v[f"price_{n}"] = N.money_input_value(it.unit_price)
-            elif kind in ("paysource", "paysource_opt"):
-                v["pay_source"] = "partner" if doc.paid_by_partner_id else "account"
+            elif kind in ("paysource", "paysource_opt", "paysource_credit"):
+                v["pay_source"] = ("credit" if doc.supplier_id and kind == "paysource_credit"
+                                   else "partner" if doc.paid_by_partner_id else "account")
+                v["supplier_id"] = str(doc.supplier_id or "")
                 v["paid_by_partner_id"] = str(doc.paid_by_partner_id or "")
                 v["money_account_id"] = str(doc.money_account_id or "")
             elif field != "asset_name":

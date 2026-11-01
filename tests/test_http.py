@@ -733,3 +733,22 @@ def test_stock_via_forms(ready):
     assert "flash ok" in r.text
     r = c.get("/reports/trial")
     assert "✓" in r.text
+
+
+def test_expense_on_credit_via_form(ready):
+    c = ready
+    c.post("/master/supplier/save", {"name": "محمد علي"}, page="/master/supplier")
+    s = c.db()
+    from app.models import Supplier
+    sup = s.scalar(select(Supplier.id))
+    s.close()
+    r = c.get("/documents/new/EXPENSE")
+    assert 'value="credit"' in r.text
+    r = c.post("/documents/new/EXPENSE", {"date": "2026-10-03", "category": "wages", "amount": "٣٠٠٠",
+                                          "pay_source": "credit", "supplier_id": str(sup)}, page="/documents/new/EXPENSE")
+    assert "flash ok" in r.text and "سند قيد" in r.text
+    r = c.post("/documents/new/EXPENSE", {"date": "2026-10-03", "category": "wages", "amount": "1",
+                                          "pay_source": "credit"}, page="/documents/new/EXPENSE")
+    assert "اختر المورد" in r.text
+    r = c.get("/inventory")
+    assert "3,000.00" in r.text  # owed to the cook

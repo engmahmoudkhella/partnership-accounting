@@ -403,6 +403,7 @@ T: dict[str, tuple[str, str]] = {
     "f_opening_date": ("تاريخ بداية الحسابات", "Start date of the books"),
     "pay_from_account": ("من صندوق/حساب الشركة", "From a company account"),
     "pay_by_partner": ("دفعه شريك من ماله الخاص", "Paid personally by a partner"),
+    "pay_on_credit": ("على الحساب (دين لمورد / عامل)", "On credit (owed to a supplier / worker)"),
     "none_option_project": ("بدون مشروع (عام)", "No project (general)"),
     "none_option_call": ("بدون (دفعة إضافية)", "None (extra contribution)"),
     "none_option_money_account": ("—", "—"),

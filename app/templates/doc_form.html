@@ -41,10 +41,12 @@
   </fieldset>
   {% elif kind == 'category' %}
   <label>{{ label }} *<select name="category" data-testid="f-category"><option value="">—</option>{% for c in opts.category %}<option value="{{ c }}" {{ 'selected' if values.get('category')==c }}>{{ t('cat_' + c) }}</option>{% endfor %}</select></label>
-  {% elif kind in ('paysource', 'paysource_opt') %}
-  <fieldset class="paysource"><legend>{{ t('f_pay_source') }}{% if kind == 'paysource' %} *{% endif %}</legend>{% if kind == 'paysource_opt' %}<small class="muted">{{ t('help_pay_source_opt') }}</small><br>{% endif %}
+  {% elif kind in ('paysource', 'paysource_opt', 'paysource_credit') %}
+  <fieldset class="paysource"><legend>{{ t('f_pay_source') }}{% if kind != 'paysource_opt' %} *{% endif %}</legend>{% if kind == 'paysource_opt' %}<small class="muted">{{ t('help_pay_source_opt') }}</small><br>{% endif %}
     <label class="inline"><input type="radio" name="pay_source" value="account" {{ 'checked' if values.get('pay_source','account')=='account' }} data-testid="pay-account"> {{ t('pay_from_account') }}</label>
     <label class="inline"><input type="radio" name="pay_source" value="partner" {{ 'checked' if values.get('pay_source')=='partner' }} data-testid="pay-partner"> {{ t('pay_by_partner') }}</label>
+    {% if kind == 'paysource_credit' %}<label class="inline"><input type="radio" name="pay_source" value="credit" {{ 'checked' if values.get('pay_source')=='credit' }} data-testid="pay-credit"> {{ t('pay_on_credit') }}</label>
+    <label class="ps-credit">{{ t('f_supplier_id') }}<select name="supplier_id" data-testid="f-credit-supplier"><option value="">—</option>{% for o in opts.supplier %}<option value="{{ o.id }}" {{ 'selected' if values.get('supplier_id')==o.id|string }}>{{ o.name }}</option>{% endfor %}</select></label>{% endif %}
     <label class="ps-account">{{ t('f_money_account_id') }}<select name="money_account_id" data-testid="f-money_account_id"><option value="">—</option>{% for a in opts.money_account %}<option value="{{ a.id }}" {{ 'selected' if values.get('money_account_id')==a.id|string }}>{{ a.name }}</option>{% endfor %}</select></label>
     <label class="ps-partner">{{ t('f_paid_by_partner_id') }}<select name="paid_by_partner_id" data-testid="f-paid_by_partner_id"><option value="">—</option>{% for p in opts.pay_partners %}<option value="{{ p.id }}" {{ 'selected' if values.get('paid_by_partner_id')==p.id|string }}>{{ p.name }}</option>{% endfor %}</select></label>
     <small class="muted">{{ t('help_paid_by_partner') }}</small>
