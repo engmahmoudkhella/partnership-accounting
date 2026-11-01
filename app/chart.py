@@ -8,7 +8,10 @@ journal line (which cash box, which partner...). Here every (control account, ke
       11000 الأصول المتداولة
         11100 النقدية والبنوك        111NN = one per cash box / bank account
         11200 ذمم الجهات المستفيدة    112NN = one per customer
+        11300 المخزون                 113NN = one per stock item
       12000 الأصول الثابتة           120NN = one per asset
+    20000 الخصوم
+      21000 ذمم الموردين             210NN = one per supplier
     30000 حقوق الملكية
       31000 رأس مال الشركاء          310NN = one per partner
       32000 أرباح موزعة على الشركاء  320NN = one per partner
@@ -28,11 +31,12 @@ from dataclasses import dataclass, field
 
 from sqlalchemy import select
 
-from .models import EXPENSE_CATEGORIES, Asset, Customer, Document, JournalLine, MoneyAccount, Partner
+from .models import EXPENSE_CATEGORIES, Asset, Customer, Document, Item, JournalLine, MoneyAccount, Partner, Supplier
 
 CASH, AR, FA, CAP, DIST, REV, GAIN, EXP, LOSS = (
     "1100", "1200", "1500", "3100", "3200", "4100", "4900", "5100", "5900",
 )
+INV, AP = "1300", "2100"
 
 # code, parent, nature (d = normally debit, c = normally credit)
 GROUPS = [
@@ -40,7 +44,10 @@ GROUPS = [
     ("11000", "10000", "d"),
     ("11100", "11000", "d"),
     ("11200", "11000", "d"),
+    ("11300", "11000", "d"),
     ("12000", "10000", "d"),
+    ("20000", None, "c"),
+    ("21000", "20000", "c"),
     ("30000", None, "c"),
     ("31000", "30000", "c"),
     ("32000", "30000", "d"),
@@ -55,6 +62,8 @@ GROUP_NATURE = {c: n for c, _, n in GROUPS}
 LEAF_RULES = {
     CASH: ("111", "11100", "d"),
     AR: ("112", "11200", "d"),
+    INV: ("113", "11300", "d"),
+    AP: ("210", "21000", "c"),
     FA: ("120", "12000", "d"),
     CAP: ("310", "31000", "c"),
     DIST: ("320", "32000", "d"),
@@ -68,7 +77,7 @@ def _key(prefix: str, n: int | None) -> str:
 
 
 def line_code(account: str, *, money_account_id=None, customer_id=None, asset_id=None, partner_id=None,
-              category: str = "") -> str:
+              category: str = "", item_id=None, supplier_id=None) -> str:
     if account in FIXED_LEAVES:
         return FIXED_LEAVES[account][0]
     prefix = LEAF_RULES[account][0]
@@ -78,6 +87,10 @@ def line_code(account: str, *, money_account_id=None, customer_id=None, asset_id
         return _key(prefix, customer_id)
     if account == FA:
         return _key(prefix, asset_id)
+    if account == INV:
+        return _key(prefix, item_id)
+    if account == AP:
+        return _key(prefix, supplier_id)
     if account in (CAP, DIST):
         return _key(prefix, partner_id)
     # expenses: one leaf per category, in the fixed order of EXPENSE_CATEGORIES
@@ -87,7 +100,8 @@ def line_code(account: str, *, money_account_id=None, customer_id=None, asset_id
 
 def code_of(ln: JournalLine) -> str:
     return line_code(ln.account, money_account_id=ln.money_account_id, customer_id=ln.customer_id,
-                     asset_id=ln.asset_id, partner_id=ln.partner_id, category=ln.category or "")
+                     asset_id=ln.asset_id, partner_id=ln.partner_id, category=ln.category or "",
+                     item_id=ln.item_id, supplier_id=ln.supplier_id)
 
 
 def is_group(code: str) -> bool:
@@ -171,8 +185,12 @@ def leaf_names(s, t) -> dict[str, str]:
         names[_key("111", a.id)] = a.name
     for c in s.scalars(select(Customer).order_by(Customer.id)):
         names[_key("112", c.id)] = c.name
+    for i in s.scalars(select(Item).order_by(Item.id)):
+        names[_key("113", i.id)] = i.name
     for a in s.scalars(select(Asset).order_by(Asset.id)):
         names[_key("120", a.id)] = a.name
+    for sp in s.scalars(select(Supplier).order_by(Supplier.id)):
+        names[_key("210", sp.id)] = sp.name
     for p in s.scalars(select(Partner).order_by(Partner.id)):
         names[_key("310", p.id)] = t("coa_capital_of", name=p.name)
         names[_key("320", p.id)] = t("coa_dist_of", name=p.name)
@@ -276,6 +294,12 @@ def voucher_kind(doc: Document) -> str:
         return "payment" if doc.money_account_id else "journal"  # paid by a partner: no cash moves
     if t == "INVOICE":
         return "invoice"
+    if t == "PURCHASE":
+        return "purchase"
+    if t == "SUPPLIER_PAYMENT":
+        return "payment" if doc.money_account_id else "journal"
+    if t == "STOCK_ISSUE" or (t == "PRODUCTION" and doc.items):
+        return "issue"
     if t in ("CAPITAL_CALL", "PRODUCTION"):
         return "memo"
     return "journal"  # OPENING, TRANSFER, CAPITAL_TRANSFER, ASSET_DISPOSAL

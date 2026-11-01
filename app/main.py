@@ -32,6 +32,9 @@ from .models import (
     Asset,
     AuditLog,
     Contract,
+    Item,
+    RecipeLine,
+    Supplier,
     Customer,
     Document,
     JournalLine,
@@ -497,6 +500,8 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             "asset": owned_assets,
             "call": calls,
             "category": EXPENSE_CATEGORIES,
+            "supplier": active_or_current(Supplier, [keep.supplier_id]),
+            "item": list(s.scalars(select(Item).where(Item.active.is_(True)).order_by(Item.id))),
         }
 
     def doc_values(doc: Document) -> dict:
@@ -506,7 +511,13 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
                 v[field] = N.money_input_value(getattr(doc, field))
             elif kind == "qty":
                 v[field] = N.qty_input_value(getattr(doc, field))
-            elif kind == "paysource":
+            elif kind == "items":
+                for n, it in enumerate(doc.items):
+                    v[f"item_id_{n}"] = str(it.item_id)
+                    v[f"qty_{n}"] = N.qty_input_value(it.quantity)
+                    if it.unit_price:
+                        v[f"price_{n}"] = N.money_input_value(it.unit_price)
+            elif kind in ("paysource", "paysource_opt"):
                 v["pay_source"] = "partner" if doc.paid_by_partner_id else "account"
                 v["paid_by_partner_id"] = str(doc.paid_by_partner_id or "")
                 v["money_account_id"] = str(doc.money_account_id or "")
@@ -574,6 +585,8 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             "customer": {p.id: p.name for p in s.scalars(select(Customer))},
             "money_account": {p.id: p.name for p in s.scalars(select(MoneyAccount))},
             "asset": {p.id: p.name for p in s.scalars(select(Asset))},
+            "supplier": {p.id: p.name for p in s.scalars(select(Supplier))},
+            "item": {p.id: p for p in s.scalars(select(Item))},
             "user": {u.id: u.full_name for u in s.scalars(select(User))},
         }
 
@@ -600,8 +613,19 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             except BusinessError:
                 extra["shares"] = []
             extra["share_names"] = {p.id: p.name for p in ctx.s.scalars(select(Partner))}
-        if doc_type in ("EXPENSE", "ASSET_PURCHASE"):
+        if doc_type in ("EXPENSE", "ASSET_PURCHASE", "PURCHASE"):
             extra["threshold"] = ctx.L.approval_threshold
+        if doc_type in ("STOCK_ISSUE", "PRODUCTION"):
+            extra["stock"] = {i.id: ctx.L.stock_of(i.id)[0] for i in ctx.s.scalars(select(Item))}
+        if doc_type == "PRODUCTION":
+            items = {i.id: i for i in ctx.s.scalars(select(Item))}
+            extra["recipes"] = {}
+            for p in ctx.s.scalars(select(Project).where(Project.active.is_(True))):
+                lines = ctx.L.recipe_of(p.id)
+                if lines:
+                    cov = ctx.L.coverage(p.id)
+                    extra["recipes"][p.id] = {"lines": [(items[r.item_id], r.quantity) for r in lines],
+                                              "units": cov["units"], "unit_name": p.unit_name}
         return extra
 
     @app.post("/documents/new/{doc_type}")
@@ -920,7 +944,8 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
 
     # ------------------------------------------------------------ master data
 
-    MASTER = {"project": Project, "money_account": MoneyAccount, "customer": Customer}
+    MASTER = {"project": Project, "money_account": MoneyAccount, "customer": Customer, "supplier": Supplier,
+              "item": Item}
 
     # ------------------------------------------------------------ monthly contracts
 
@@ -996,6 +1021,59 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         flash(ctx.request, "ok", ctx.t("msg_deleted"))
         raise_commit_redirect(ctx, "/contracts")
 
+    # ------------------------------------------------------------ stock
+
+    @app.get("/inventory", response_class=HTMLResponse)
+    @page
+    async def inventory_page(ctx: Ctx):
+        require(ctx)
+        q = ctx.request.query_params
+        as_of = opt_date(q.get("as_of"))
+        d1, d2 = opt_date(q.get("from")), opt_date(q.get("to"))
+        L = ctx.L
+        items = {i.id: i for i in ctx.s.scalars(select(Item))}
+        projects = list(ctx.s.scalars(select(Project).where(Project.active.is_(True)).order_by(Project.id)))
+        recipes = []
+        for p in projects:
+            lines = {r.item_id: r.quantity for r in L.recipe_of(p.id)}
+            cov = L.coverage(p.id, as_of) if lines else {"units": None, "limiting_item_id": None}
+            # cost per unit in the period: materials taken out for the project / units produced
+            fq = [Document.project_id == p.id, Document.status == "POSTED"]
+            if d1:
+                fq.append(Document.date >= d1)
+            if d2:
+                fq.append(Document.date <= d2)
+            produced = int(ctx.s.scalar(select(func.coalesce(func.sum(Document.quantity), 0))
+                                        .where(Document.doc_type == "PRODUCTION", *fq)))
+            jq = [JournalLine.account == "1300", JournalLine.project_id == p.id, JournalLine.credit > 0]
+            if d1:
+                jq.append(JournalLine.date >= d1)
+            if d2:
+                jq.append(JournalLine.date <= d2)
+            used = int(ctx.s.scalar(select(func.coalesce(func.sum(JournalLine.credit), 0)).where(*jq)))
+            recipes.append({"project": p, "lines": lines, "cov": cov, "produced": produced, "used": used,
+                            "per_unit": (used * 1000 // produced) if produced else None})
+        suppliers = [(sp, L.balance("2100", supplier_id=sp.id))
+                     for sp in ctx.s.scalars(select(Supplier).order_by(Supplier.active.desc(), Supplier.id))]
+        return render(ctx, "inventory.html", rows=L.inventory(as_of), as_of=as_of, d1=d1, d2=d2, items=items,
+                      recipes=recipes, suppliers=suppliers, active_items=[i for i in items.values() if i.active])
+
+    @app.post("/inventory/recipe/{pid:int}")
+    @page
+    async def recipe_save(ctx: Ctx, pid: int, form):
+        require(ctx, "admin", "accountant")
+        project = get_or_404(ctx, Project, pid)
+        quantities = {}
+        for item in ctx.s.scalars(select(Item)):
+            raw = (form.get(f"r_{item.id}") or "").strip()
+            if raw == "" and f"r_{item.id}" in form:
+                quantities[item.id] = 0
+            elif raw:
+                quantities[item.id] = N.parse_quantity(raw, allow_zero=True)
+        ctx.L.set_recipe(project, quantities)
+        flash(ctx.request, "ok", ctx.t("msg_saved"))
+        raise_commit_redirect(ctx, "/inventory")
+
     @app.get("/master/{entity}", response_class=HTMLResponse)
     @page
     async def master_list(ctx: Ctx, entity: str):
@@ -1010,10 +1088,15 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             bal = {i.id: ctx.L.balance(CASH, money_account_id=i.id) for i in items}
         if entity == "customer":
             bal = {i.id: ctx.L.balance("1200", customer_id=i.id) for i in items}
+        if entity == "supplier":
+            bal = {i.id: ctx.L.balance("2100", supplier_id=i.id) for i in items}
+        if entity == "item":
+            bal = {i.id: ctx.L.stock_of(i.id) for i in items}
         edit = None
         if safe_id(ctx.request.query_params.get("edit")):
             edit = ctx.s.get(model, safe_id(ctx.request.query_params["edit"]))
-        return render(ctx, "master.html", entity=entity, items=items, refs=refs, bal=bal, edit=edit)
+        return render(ctx, "master.html", entity=entity, items=items, refs=refs, bal=bal, edit=edit,
+                      categories=EXPENSE_CATEGORIES)
 
     @app.post("/master/{entity}/save")
     @page
@@ -1028,6 +1111,10 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             fields.update(kind=form.get("kind", ""), holder=form.get("holder", ""))
         if entity == "project":
             fields.update(kind=form.get("kind", ""), unit_name=form.get("unit_name", ""), notes=form.get("notes", ""))
+        if entity == "supplier":
+            fields.update(phone=form.get("phone", ""))
+        if entity == "item":
+            fields.update(unit=form.get("unit", ""), category=form.get("category", ""))
         ctx.L.save_master(entity, obj, **fields)
         flash(ctx.request, "ok", ctx.t("msg_saved"))
         raise_commit_redirect(ctx, f"/master/{entity}")
@@ -1199,6 +1286,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         code = q.get("code") if q.get("code") in codes else None
         data = COA.account_ledger(ctx.s, code, d1, d2, project) if code else None
         return render(ctx, "report_ledger.html", nodes=nodes, code=code, data=data, d1=d1, d2=d2,
+                      groups=set(COA.GROUP_PARENT),
                       project=project, names=_names(ctx), coa=coa_names(ctx),
                       projects=list(ctx.s.scalars(select(Project).order_by(Project.id))))
 

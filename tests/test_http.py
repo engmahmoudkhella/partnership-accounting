@@ -692,3 +692,44 @@ def test_al_aseel_reports_and_printable_vouchers(ready):
         assert r.status_code == 200 and "✓" in r.text, q
     r = c.get("/reports/ledger?code=99999")  # unknown code: just the chooser
     assert r.status_code == 200
+
+
+def test_stock_via_forms(ready):
+    c = ready
+    ids = c.ids
+    c.post("/master/supplier/save", {"name": "شريف السوافيري"}, page="/master/supplier")
+    c.post("/master/item/save", {"name": "لحم عجل", "unit": "كغ", "category": "meat"}, page="/master/item")
+    c.post("/master/item/save", {"name": "رز", "unit": "كغ", "category": "food"}, page="/master/item")
+    s = c.db()
+    from app.models import Item, Supplier
+    sup = s.scalar(select(Supplier.id))
+    beef, rice = [i.id for i in s.scalars(select(Item).order_by(Item.id))]
+    s.close()
+    # purchase typed with Arabic digits: 50 kg beef at 35, 100 kg rice at 9 = 2,650; paid 1,000 now
+    r = c.post("/documents/new/PURCHASE", {"date": "2026-10-03", "supplier_id": str(sup),
+                                           "item_id_0": str(beef), "qty_0": "٥٠", "price_0": "٣٥",
+                                           "item_id_1": str(rice), "qty_1": "100", "price_1": "9",
+                                           "paid": "1,000", "pay_source": "account",
+                                           "money_account_id": str(ids["cash"])}, page="/documents/new/PURCHASE")
+    assert "flash ok" in r.text, r.text[:3000]
+    assert "1,650.00" in r.text  # remaining debt
+    # recipe: one meal = 0.150 kg beef + 0.400 kg rice
+    r = c.post(f"/inventory/recipe/{ids['project']}", {f"r_{beef}": "0.150", f"r_{rice}": "٠٫٤٠٠"}, page="/inventory")
+    assert "flash ok" in r.text
+    r = c.get("/inventory")
+    assert "250" in r.text  # 100 kg rice / 0.4 = 250 meals (beef allows 333)
+    r = c.post("/documents/new/PRODUCTION", {"date": "2026-10-04", "project_id": str(ids["project"]),
+                                             "quantity": "100"}, page="/documents/new/PRODUCTION")
+    assert "flash ok" in r.text and "إذن صرف مواد" in r.text
+    r = c.get("/inventory")
+    assert "8.85" in r.text  # cost per meal: 0.4 x 9 + 0.15 x 35
+    # issuing more than in stock is refused with the available quantity
+    r = c.post("/documents/new/STOCK_ISSUE", {"date": "2026-10-04", "project_id": str(ids["project"]),
+                                              "item_id_0": str(rice), "qty_0": "61"}, page="/documents/new/STOCK_ISSUE")
+    assert "المتوفر 60" in r.text
+    r = c.post("/documents/new/SUPPLIER_PAYMENT", {"date": "2026-10-05", "supplier_id": str(sup), "amount": "1650",
+                                                   "pay_source": "account", "money_account_id": str(ids["cash"])},
+               page="/documents/new/SUPPLIER_PAYMENT")
+    assert "flash ok" in r.text
+    r = c.get("/reports/trial")
+    assert "✓" in r.text

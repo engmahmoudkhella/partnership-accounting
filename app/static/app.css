@@ -190,3 +190,4 @@ table.coa tr.lvl-3 .coa-name{padding-inline-start:4.4rem}
 table.journal-book tr.entry-head td{background:#f1f5f9;border-top:2px solid var(--line2)}
 table.journal-book tr.cr td.jn{padding-inline-start:2rem}
 @media print{.subnav,.voucher-line .btn{display:none!important}main{max-width:none;padding:0}.scroll{overflow:visible}table{font-size:11px}}
+.t-inv{--accent:#2bb3c0}.t-pay{--accent:#b42318}

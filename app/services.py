@@ -47,17 +47,24 @@ from .models import (
     OpeningLine,
     Partner,
     Project,
+    RecipeLine,
     Setting,
+    Supplier,
+    Item,
+    DocumentItem,
     ShareLine,
     ShareVersion,
     User,
     utcnow,
 )
 from .numbers import PPM_TOTAL, allocate, line_total, round_half_up_div
+from .numbers import format_quantity as N_format_quantity
 
 CASH, AR, FA, CAP, DIST, REV, GAIN, EXP, LOSS = (
     "1100", "1200", "1500", "3100", "3200", "4100", "4900", "5100", "5900",
 )
+INV, AP = "1300", "2100"  # stock (by item) and amounts owed to suppliers (by supplier)
+STOCK_TYPES = ("PURCHASE", "STOCK_ISSUE", "PRODUCTION")
 PL_CREDIT = (REV, GAIN)
 PL_DEBIT = (EXP, LOSS)
 
@@ -113,6 +120,9 @@ class Line:
     money_account_id: int | None = None
     asset_id: int | None = None
     category: str = ""
+    item_id: int | None = None
+    supplier_id: int | None = None
+    quantity: int = 0
 
 
 class Ledger:
@@ -494,7 +504,8 @@ class Ledger:
         self.s.flush()
         self.audit("delete", "partner", partner.id, snap, None)
 
-    _MASTER = {"project": Project, "money_account": MoneyAccount, "customer": Customer}
+    _MASTER = {"project": Project, "money_account": MoneyAccount, "customer": Customer, "supplier": Supplier,
+               "item": Item}
 
     def save_master(self, entity: str, obj, **fields):
         self._require_role("admin", "accountant")
@@ -505,6 +516,11 @@ class Ledger:
             raise BusinessError("err_invalid_choice")
         if entity == "project" and fields.get("kind") not in ("kitchen", "parcels", "other"):
             raise BusinessError("err_invalid_choice")
+        if entity == "item":
+            if fields.get("category") not in EXPENSE_CATEGORIES:
+                raise BusinessError("err_invalid_choice")
+            if not (fields.get("unit") or "").strip():
+                raise BusinessError("err_unit_required")
         before = self._entity_snapshot(obj) if obj else None
         if obj is None:
             obj = model(name=name)
@@ -517,7 +533,12 @@ class Ledger:
         return obj
 
     def master_references(self, kind: str, obj_id: int) -> int:
-        col = {"project": "project_id", "money_account": "money_account_id", "customer": "customer_id"}[kind]
+        if kind == "item":
+            n = self.s.scalar(select(func.count(DocumentItem.id)).where(DocumentItem.item_id == obj_id))
+            n += self.s.scalar(select(func.count(RecipeLine.id)).where(RecipeLine.item_id == obj_id))
+            return n + self.s.scalar(select(func.count(JournalLine.id)).where(JournalLine.item_id == obj_id))
+        col = {"project": "project_id", "money_account": "money_account_id", "customer": "customer_id",
+               "supplier": "supplier_id"}[kind]
         n = self.s.scalar(select(func.count(Document.id)).where(getattr(Document, col) == obj_id))
         n += self.s.scalar(select(func.count(JournalLine.id)).where(getattr(JournalLine, col) == obj_id))
         if kind == "money_account":
@@ -542,9 +563,12 @@ class Ledger:
         self._require_role("admin", "accountant")
         if obj.active == active:
             return
-        if not active:
+        if not active and kind == "item":
+            if self.stock_of(obj.id)[0] != 0:
+                raise BusinessError("err_item_in_stock")
+        elif not active:
             col = {"project": Document.project_id, "money_account": Document.money_account_id,
-                   "customer": Document.customer_id}[kind]
+                   "customer": Document.customer_id, "supplier": Document.supplier_id}[kind]
             q = select(func.count(Document.id)).where(col == obj.id, Document.status == "PENDING")
             if kind == "money_account":
                 q2 = select(func.count(Document.id)).where(Document.money_account2_id == obj.id,
@@ -558,6 +582,8 @@ class Ledger:
                 raise BusinessError("err_account_not_empty")
             if kind == "customer" and self.balance(AR, customer_id=obj.id) != 0:
                 raise BusinessError("err_customer_not_settled")
+            if kind == "supplier" and self.balance(AP, supplier_id=obj.id) != 0:
+                raise BusinessError("err_supplier_not_settled")
         before = self._entity_snapshot(obj)
         obj.active = active
         self.s.flush()
@@ -709,6 +735,9 @@ class Ledger:
                 for o in doc.opening_lines]
         if doc.call_shares:
             out["call_shares"] = {str(c.partner_id): c.amount for c in doc.call_shares}
+        if doc.items:
+            out["items"] = [{"item_id": i.item_id, "quantity": i.quantity, "unit_price": i.unit_price,
+                             "amount": i.amount} for i in doc.items]
         return out
 
     # fields each type uses (anything else is reset to its empty value)
@@ -724,11 +753,14 @@ class Ledger:
         "TRANSFER": ("money_account_id", "money_account2_id", "amount", "fee"),
         "DISTRIBUTION": ("money_account_id", "amount"),
         "PRODUCTION": ("project_id", "quantity"),
+        "PURCHASE": ("supplier_id", "project_id", "paid", "money_account_id", "paid_by_partner_id"),
+        "SUPPLIER_PAYMENT": ("supplier_id", "amount", "money_account_id", "paid_by_partner_id"),
+        "STOCK_ISSUE": ("project_id",),
     }
-    _EMPTY = {"amount": 0, "fee": 0, "quantity": 0, "unit_price": 0, "category": "", "supplier": ""}
+    _EMPTY = {"amount": 0, "fee": 0, "quantity": 0, "unit_price": 0, "category": "", "supplier": "", "paid": 0}
     _ALL_FIELDS = ("partner_id", "partner2_id", "project_id", "customer_id", "money_account_id",
-                   "money_account2_id", "asset_id", "capital_call_id", "paid_by_partner_id",
-                   "amount", "fee", "quantity", "unit_price", "category", "supplier")
+                   "money_account2_id", "asset_id", "capital_call_id", "paid_by_partner_id", "supplier_id",
+                   "amount", "fee", "quantity", "unit_price", "category", "supplier", "paid")
 
     def _apply_fields(self, doc: Document, data: dict, old: Document | None):
         allowed = self.FIELDS[doc.doc_type]
@@ -876,6 +908,34 @@ class Ledger:
         elif t == "PRODUCTION":
             project(doc.project_id, required=True)
             positive(doc.quantity, "err_quantity_positive")
+        elif t in ("PURCHASE", "SUPPLIER_PAYMENT"):
+            req(doc.supplier_id, "err_supplier_required")
+            self._active_ref(Supplier, doc.supplier_id, o.get("supplier_id"), "err_supplier_inactive")
+            if t == "PURCHASE":
+                self._check_items(doc, priced=True)
+                project(doc.project_id)
+                doc.amount = sum(i.amount for i in doc.items)
+                positive(doc.amount)
+                if not isinstance(doc.paid, int) or doc.paid < 0:
+                    raise BusinessError("err_number_negative")
+                if doc.paid > doc.amount:
+                    raise BusinessError("err_paid_over_total")
+                paying = doc.paid
+            else:
+                positive(doc.amount)
+                paying = doc.amount
+            if paying:
+                if (doc.money_account_id is None) == (doc.paid_by_partner_id is None):
+                    raise BusinessError("err_pay_source")
+                if doc.money_account_id is not None:
+                    money(doc.money_account_id)
+                else:
+                    partner(doc.paid_by_partner_id)
+            else:
+                doc.money_account_id = doc.paid_by_partner_id = None
+        elif t == "STOCK_ISSUE":
+            project(doc.project_id, required=True)
+            self._check_items(doc, priced=False)
 
     # ---------------------------------------------------------------- lines
 
@@ -941,6 +1001,35 @@ class Ledger:
                 if amt:
                     L.append(Line(DIST, debit=amt, partner_id=pid))
             L.append(Line(CASH, credit=doc.amount, money_account_id=doc.money_account_id))
+        elif t == "PURCHASE":
+            for it in doc.items:
+                L.append(Line(INV, debit=it.amount, item_id=it.item_id, quantity=it.quantity,
+                              project_id=doc.project_id))
+            if doc.paid:
+                if doc.money_account_id is not None:
+                    L.append(Line(CASH, credit=doc.paid, money_account_id=doc.money_account_id))
+                else:
+                    L.append(Line(CAP, credit=doc.paid, partner_id=doc.paid_by_partner_id))
+            if doc.amount - doc.paid:
+                L.append(Line(AP, credit=doc.amount - doc.paid, supplier_id=doc.supplier_id))
+        elif t == "SUPPLIER_PAYMENT":
+            L.append(Line(AP, debit=doc.amount, supplier_id=doc.supplier_id))
+            if doc.money_account_id is not None:
+                L.append(Line(CASH, credit=doc.amount, money_account_id=doc.money_account_id))
+            else:
+                L.append(Line(CAP, credit=doc.amount, partner_id=doc.paid_by_partner_id))
+        elif t in ("STOCK_ISSUE", "PRODUCTION"):
+            # items leave the store at average cost and become an expense of the project
+            total = 0
+            for it in doc.items:
+                item = self.s.get(Item, it.item_id)
+                it.amount = self._issue_cost(item, it.quantity, doc.date, doc.id)
+                total += it.amount
+                L.append(Line(EXP, debit=it.amount, project_id=doc.project_id, category=item.category))
+                L.append(Line(INV, credit=it.amount, item_id=it.item_id, quantity=-it.quantity,
+                              project_id=doc.project_id))
+            if t == "STOCK_ISSUE":
+                doc.amount = total
         return L
 
     def distribution_weights(self, d: dt.date, exclude_doc_id: int | None = None) -> list[tuple[int, int]]:
@@ -982,7 +1071,8 @@ class Ledger:
             self.s.delete(ln)
         doc.lines.clear()
         self.s.flush()
-        if doc.status != "POSTED" or doc.doc_type in MEMO_TYPES:
+        if doc.status != "POSTED" or (doc.doc_type in MEMO_TYPES
+                                      and not (doc.doc_type == "PRODUCTION" and doc.items)):
             return
         lines = self._lines_for(doc)
         dr = sum(x.debit for x in lines)
@@ -997,7 +1087,8 @@ class Ledger:
             doc.lines.append(JournalLine(date=doc.date, account=x.account, debit=x.debit, credit=x.credit,
                                          partner_id=x.partner_id, project_id=x.project_id,
                                          customer_id=x.customer_id, money_account_id=x.money_account_id,
-                                         asset_id=x.asset_id, category=x.category))
+                                         asset_id=x.asset_id, category=x.category, item_id=x.item_id,
+                                         supplier_id=x.supplier_id, quantity=x.quantity))
         self.s.flush()
 
     def _rebuild_call_shares(self, doc: Document):
@@ -1009,6 +1100,118 @@ class Ledger:
             doc.call_shares.append(CallShare(partner_id=pid, amount=amt))
         self.s.flush()
 
+    # ---------------------------------------------------------------- stock
+
+    def _set_items(self, doc: Document, data: dict):
+        if doc.doc_type not in STOCK_TYPES:
+            return
+        doc.items.clear()
+        if doc.doc_type == "PRODUCTION":
+            # the recipe of the project at the time of production (kept on the document)
+            if doc.project_id and isinstance(doc.quantity, int) and doc.quantity > 0:
+                for r in self.s.scalars(select(RecipeLine).where(RecipeLine.project_id == doc.project_id)
+                                        .order_by(RecipeLine.id)):
+                    q = round_half_up_div(r.quantity * doc.quantity, 1000)
+                    if q > 0:
+                        doc.items.append(DocumentItem(item_id=r.item_id, quantity=q))
+            return
+        merged: dict = {}
+        for row in data.get("items") or []:
+            iid, q, price = row.get("item_id"), row.get("quantity") or 0, row.get("unit_price") or 0
+            if iid is None and not q:
+                continue
+            if doc.doc_type == "STOCK_ISSUE":
+                merged[iid] = merged.get(iid, 0) + q
+            else:
+                doc.items.append(DocumentItem(item_id=iid, quantity=q, unit_price=price))
+        for iid, q in merged.items():
+            doc.items.append(DocumentItem(item_id=iid, quantity=q))
+
+    def _check_items(self, doc: Document, priced: bool):
+        if not doc.items:
+            raise BusinessError("err_items_required")
+        for it in doc.items:
+            if it.item_id is None:
+                raise BusinessError("err_item_required")
+            item = self.s.get(Item, it.item_id)
+            if item is None:
+                raise BusinessError("err_not_found")
+            if not item.active:
+                raise BusinessError("err_item_inactive", item=item.name)
+            if not isinstance(it.quantity, int) or it.quantity <= 0:
+                raise BusinessError("err_quantity_positive")
+            if priced:
+                if not isinstance(it.unit_price, int) or it.unit_price <= 0:
+                    raise BusinessError("err_price_positive")
+                it.amount = line_total(it.quantity, it.unit_price)
+
+    def stock_of(self, item_id: int, as_of: dt.date | None = None, exclude_doc_id: int | None = None):
+        """(quantity in thousandths, value in agorot) of an item in the store."""
+        q = select(func.coalesce(func.sum(JournalLine.quantity), 0),
+                   func.coalesce(func.sum(JournalLine.debit - JournalLine.credit), 0)).where(
+            JournalLine.account == INV, JournalLine.item_id == item_id)
+        if as_of:
+            q = q.where(JournalLine.date <= as_of)
+        if exclude_doc_id:
+            q = q.where(JournalLine.document_id != exclude_doc_id)
+        qty, value = self.s.execute(q).one()
+        return int(qty), int(value)
+
+    def _issue_cost(self, item: Item, qty: int, d: dt.date, doc_id: int | None) -> int:
+        """Weighted average cost of taking ``qty`` out of stock on ``d``."""
+        have, value = self.stock_of(item.id, d, exclude_doc_id=doc_id)
+        if qty > have:
+            raise BusinessError("err_stock_insufficient", item=item.name, unit=item.unit,
+                                available=N_format_quantity(have), date=d.isoformat())
+        return value if qty == have else round_half_up_div(value * qty, have)
+
+    def recipe_of(self, project_id: int) -> list[RecipeLine]:
+        return list(self.s.scalars(select(RecipeLine).where(RecipeLine.project_id == project_id)
+                                   .order_by(RecipeLine.id)))
+
+    def set_recipe(self, project: Project, quantities: dict[int, int]):
+        """``quantities``: item id -> thousandths of the item used by one produced unit (0 removes it)."""
+        self._require_role("admin", "accountant")
+        before = {r.item_id: r.quantity for r in self.recipe_of(project.id)}
+        for iid, q in quantities.items():
+            if self.s.get(Item, iid) is None:
+                raise BusinessError("err_not_found")
+            if not isinstance(q, int) or q < 0:
+                raise BusinessError("err_number_negative")
+        for r in self.recipe_of(project.id):
+            if r.item_id in quantities:
+                self.s.delete(r)
+        self.s.flush()
+        for iid, q in quantities.items():
+            if q > 0:
+                self.s.add(RecipeLine(project_id=project.id, item_id=iid, quantity=q))
+        self.s.flush()
+        after = {r.item_id: r.quantity for r in self.recipe_of(project.id)}
+        self.audit("update", "recipe", project.id, {str(k): v for k, v in before.items()},
+                   {str(k): v for k, v in after.items()})
+
+    def inventory(self, as_of: dt.date | None = None) -> list[dict]:
+        rows = []
+        for item in self.s.scalars(select(Item).order_by(Item.active.desc(), Item.id)):
+            qty, value = self.stock_of(item.id, as_of)
+            q_in = int(self.s.scalar(select(func.coalesce(func.sum(JournalLine.quantity), 0)).where(
+                JournalLine.account == INV, JournalLine.item_id == item.id, JournalLine.quantity > 0,
+                *([JournalLine.date <= as_of] if as_of else []))))
+            rows.append({"item": item, "qty": qty, "value": value, "qty_in": q_in, "qty_out": q_in - qty,
+                         "avg": round_half_up_div(value * 1000, qty) if qty else 0})
+        return rows
+
+    def coverage(self, project_id: int, as_of: dt.date | None = None) -> dict:
+        """How many units (meals) the stock can still produce with the project's recipe, and the
+        item that runs out first."""
+        best, limiting = None, None
+        for r in self.recipe_of(project_id):
+            qty, _v = self.stock_of(r.item_id, as_of)
+            n = max(qty, 0) // r.quantity
+            if best is None or n < best:
+                best, limiting = n, r.item_id
+        return {"units": best, "limiting_item_id": limiting}
+
     # ---------------------------------------------------------------- invariants
 
     def _running_check(self, account: str, key: str, err: str):
@@ -1018,7 +1221,7 @@ class Ledger:
             .where(JournalLine.account == account).group_by(col, JournalLine.date)
             .order_by(col, JournalLine.date)).all()
         running: dict = defaultdict(int)
-        sign = 1 if account in (CASH, AR, FA) else -1
+        sign = 1 if account in (CASH, AR, FA, INV) else -1
         for k, d, amount in rows:
             running[k] += sign * int(amount)
             if running[k] < 0:
@@ -1035,6 +1238,18 @@ class Ledger:
         self._running_check(AR, "customer_id", "err_receivable_negative")
         self._running_check(CAP, "partner_id", "err_capital_negative")
         self._running_check(FA, "asset_id", "err_asset_negative")
+        self._running_check(AP, "supplier_id", "err_payable_negative")
+        self._running_check(INV, "item_id", "err_stock_negative")
+        # stock quantities never go below zero on any day
+        running: dict = defaultdict(int)
+        for item_id, d, q in self.s.execute(
+                select(JournalLine.item_id, JournalLine.date, func.sum(JournalLine.quantity))
+                .where(JournalLine.account == INV).group_by(JournalLine.item_id, JournalLine.date)
+                .order_by(JournalLine.item_id, JournalLine.date)).all():
+            running[item_id] += int(q)
+            if running[item_id] < 0:
+                item = self.s.get(Item, item_id)
+                raise BusinessError("err_stock_negative_qty", item=item.name if item else item_id, date=d.isoformat())
         # contributions linked to a capital call never exceed that partner's called amount
         rows = self.s.execute(
             select(Document.capital_call_id, Document.partner_id, func.sum(Document.amount))
@@ -1099,6 +1314,7 @@ class Ledger:
         doc = Document(doc_type=doc_type, date=date, number=self._next_number(doc_type),
                        created_by=self.user.id if self.user else None)
         self._apply_fields(doc, data, None)
+        self._set_items(doc, data)
         if doc_type == "ASSET_PURCHASE" and not (asset_name or "").strip():
             raise BusinessError("err_asset_name_required")
         self._validate(doc, None, asset_name)
@@ -1143,6 +1359,7 @@ class Ledger:
             self._check_share_dependent_move(doc, date)
         doc.date = date
         self._apply_fields(doc, data, None)
+        self._set_items(doc, data)
         if doc.doc_type == "ASSET_PURCHASE":
             doc.asset_id = before["asset_id"]
             if asset_name is not None:
@@ -1639,14 +1856,17 @@ class Ledger:
         cash = self.balance(CASH, as_of)
         ar = self.balance(AR, as_of)
         fa = self.balance(FA, as_of)
+        inv = self.balance(INV, as_of)
+        payables = self.balance(AP, as_of)
         cap = self.balance(CAP, as_of)
         dist = self._dist_total(as_of)
         profit = self.net_profit(end=as_of)
-        assets = cash + ar + fa
+        assets = cash + ar + fa + inv
         equity = cap + profit - dist
         return {"rows": rows, "total_debit": total_d, "total_credit": total_c, "balanced": total_d == total_c,
-                "cash": cash, "receivable": ar, "fixed_assets": fa, "assets": assets, "capital": cap,
-                "profit": profit, "distributions": dist, "equity": equity, "sheet_ok": assets == equity}
+                "cash": cash, "receivable": ar, "fixed_assets": fa, "inventory": inv, "payables": payables,
+                "assets": assets, "capital": cap, "profit": profit, "distributions": dist, "equity": equity,
+                "sheet_ok": assets == payables + equity}
 
     def money_account_ledger(self, ma_id: int, start: dt.date | None = None, end: dt.date | None = None):
         opening = 0

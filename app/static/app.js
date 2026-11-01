@@ -155,6 +155,62 @@
     body.appendChild(row);
     row.querySelectorAll(".ob-debit").forEach(function (i) { i.addEventListener("input", update); });
   });
+  // item rows (purchase / stock issue): add a row, line totals, purchase total and remaining debt
+  var itemTable = document.getElementById("item-rows");
+  function itemRowsUpdate() {
+    if (!itemTable) return;
+    var total = 0n, anyTotal = false;
+    itemTable.querySelectorAll("tbody tr").forEach(function (tr) {
+      var q = parse((tr.querySelector(".it-qty") || {}).value, 3), sel = tr.querySelector(".item-sel");
+      var out = tr.querySelector(".it-total");
+      if (out) {
+        var p = parse((tr.querySelector(".it-price") || {}).value, 2);
+        if (q.minor !== undefined && p.minor !== undefined) {
+          var n = q.minor * p.minor, r = n % 1000n, t = n / 1000n + (2n * r >= 1000n ? 1n : 0n);
+          out.textContent = fmtMinor(t, 2); total += t; anyTotal = true;
+        } else out.textContent = "—";
+      }
+      var st = tr.querySelector(".it-stock");
+      if (st && sel) {
+        var o = sel.options[sel.selectedIndex];
+        st.textContent = o && o.value ? (o.dataset.stock || "0") + " " + (o.dataset.unit || "") : "";
+      }
+    });
+    var pt = document.getElementById("purchase-total");
+    if (pt) {
+      pt.textContent = anyTotal ? fmtMinor(total, 2) : "—";
+      var paid = val("paid", 2) || 0n, debt = total - paid;
+      var pd = document.getElementById("purchase-debt");
+      pd.textContent = anyTotal ? fmtMinor(debt < 0n ? 0n : debt, 2) : "—";
+    }
+  }
+  if (itemTable) {
+    itemTable.addEventListener("input", itemRowsUpdate);
+    itemTable.addEventListener("change", itemRowsUpdate);
+    var paidIn = document.querySelector("[name=paid]");
+    if (paidIn) paidIn.addEventListener("input", itemRowsUpdate);
+    var addItem = document.getElementById("add-item-row");
+    if (addItem) addItem.addEventListener("click", function () {
+      var body = itemTable.querySelector("tbody"), last = body.lastElementChild, n = body.children.length;
+      var row = last.cloneNode(true);
+      row.querySelectorAll("input,select").forEach(function (el) {
+        el.name = el.name.replace(/_\d+$/, "_" + n);
+        if (el.dataset.testid) el.dataset.testid = el.dataset.testid.replace(/-\d+$/, "-" + n);
+        if (el.tagName === "SELECT") el.selectedIndex = 0; else el.value = "";
+      });
+      row.querySelectorAll(".preview,.it-total,.it-stock").forEach(function (e) { e.textContent = ""; });
+      body.appendChild(row);
+      row.querySelectorAll("input.numin").forEach(function (i) { i.addEventListener("input", function () { preview(i); }); });
+    });
+    itemRowsUpdate();
+  }
+  // production: show the recipe of the chosen project only
+  var prodProject = document.querySelector("[data-testid=doc-form] [name=project_id]");
+  function recipeInfo() {
+    var v = prodProject ? prodProject.value : "";
+    document.querySelectorAll(".recipe-info").forEach(function (d) { d.style.display = d.dataset.project === v ? "" : "none"; });
+  }
+  if (prodProject && document.querySelector(".recipe-info")) { prodProject.addEventListener("change", recipeInfo); recipeInfo(); }
   // confirmation before destructive actions
   document.querySelectorAll("form.confirm").forEach(function (f) {
     f.addEventListener("submit", function (e) { if (!window.confirm(f.dataset.confirm)) e.preventDefault(); });

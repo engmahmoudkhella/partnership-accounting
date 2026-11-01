@@ -56,6 +56,7 @@
     {%- if doc.doc_type == 'CONTRIBUTION' -%}{{ names.partner.get(doc.partner_id, '') }}
     {%- elif doc.doc_type == 'RECEIPT' -%}{{ names.customer.get(doc.customer_id, '') }}
     {%- elif doc.doc_type == 'DISTRIBUTION' -%}{{ t('partners_distribution') }}
+    {%- elif doc.doc_type == 'SUPPLIER_PAYMENT' -%}{{ names.supplier.get(doc.supplier_id, '') }}
     {%- else -%}{{ doc.supplier or '' }}{%- endif -%}</span></div>
   <div class="row"><span class="k"></span><span class="v" data-testid="voucher-words">{{ words }}</span></div>
   <div class="row"><span class="k">{{ t('for_the_reason') }}</span><span class="v">
@@ -64,6 +65,14 @@
     {%- if asset %} · {{ asset.name }}{% endif -%}
     {%- if doc.project_id %} · {{ names.project.get(doc.project_id, '') }}{% endif %}</span></div>
   <div class="row"><span class="k">{{ t('into_account') if kind == 'receipt' else t('out_of_account') }}</span><span class="v">{{ names.money_account.get(doc.money_account_id, '') }}{% if doc.fee %} — {{ t('f_fee') }}: <span class="num" dir="ltr">{{ money(doc.fee) }}</span>, {{ t('f_amount') }}: <span class="num" dir="ltr">{{ money(cash_amount) }}</span>{% endif %}</span></div>
+  {% elif kind in ('purchase', 'issue') %}
+  {% if doc.supplier_id %}<div class="row"><span class="k">{{ t('f_supplier_id') }}</span><span class="v">{{ names.supplier.get(doc.supplier_id, '') }}</span></div>{% endif %}
+  <div class="row"><span class="k">{{ t('f_description') }}</span><span class="v">{{ doc.description or t('doc_' + doc.doc_type) }}{% if doc.project_id %} · {{ names.project.get(doc.project_id, '') }}{% endif %}{% if doc.doc_type == 'PRODUCTION' %} · <span class="num" dir="ltr">{{ qty(doc.quantity) }}</span>{% endif %}</span></div>
+  <table data-testid="voucher-items"><thead><tr><th>{{ t('f_item_id') }}</th><th class="n">{{ t('f_quantity') }}</th>{% if kind == 'purchase' %}<th class="n">{{ t('f_unit_price') }}</th>{% endif %}<th class="n">{{ t('f_line_total') }}</th></tr></thead><tbody>
+  {% for it in doc.items %}{% set item = names.item.get(it.item_id) %}<tr><td>{{ item.name if item else '' }}</td><td class="n">{{ qty(it.quantity) }} {{ item.unit if item else '' }}</td>{% if kind == 'purchase' %}<td class="n">{{ money(it.unit_price) }}</td>{% endif %}<td class="n">{{ money(it.amount) }}</td></tr>{% endfor %}
+  </tbody></table>
+  {% if kind == 'purchase' %}<div class="row"><span class="k">{{ t('f_total') }}</span><span class="v"><b class="num" dir="ltr">{{ money(doc.amount) }} ₪</b> — {{ words }}</span></div>
+  <div class="row"><span class="k">{{ t('f_paid_now') }}</span><span class="v"><span class="num" dir="ltr">{{ money(doc.paid) }}</span>{% if doc.money_account_id %} — {{ names.money_account.get(doc.money_account_id, '') }}{% endif %} · {{ t('col_debt_remaining') }}: <b class="num" dir="ltr">{{ money(doc.amount - doc.paid) }}</b></span></div>{% endif %}
   {% else %}
   <div class="row"><span class="k">{{ t('f_description') }}</span><span class="v">{{ doc.description or t('doc_' + doc.doc_type) }}{% if doc.customer_id %} · {{ names.customer.get(doc.customer_id, '') }}{% endif %}{% if doc.project_id %} · {{ names.project.get(doc.project_id, '') }}{% endif %}</span></div>
   {% if doc.amount %}<div class="row"><span class="k">{{ t('f_amount') }}</span><span class="v"><b class="num" dir="ltr">{{ money(doc.amount) }} ₪</b> — {{ words }}</span></div>{% endif %}
@@ -77,7 +86,7 @@
 
   <div class="sigs">
     <div>{{ t('sig_accountant') }}</div>
-    {% if kind == 'receipt' %}<div>{{ t('sig_payer') }}</div>{% elif kind == 'payment' %}<div>{{ t('sig_receiver') }}</div>{% endif %}
+    {% if kind == 'receipt' %}<div>{{ t('sig_payer') }}</div>{% elif kind in ('payment', 'purchase', 'issue') %}<div>{{ t('sig_receiver') }}</div>{% endif %}
     <div>{{ t('sig_manager') }}</div>
   </div>
   <div class="foot"><span>{{ t('printed_at') }}: <span class="num" dir="ltr">{{ now }}</span> · {{ user.full_name }}</span><span>{{ t('status_' + doc.status) }}</span></div>

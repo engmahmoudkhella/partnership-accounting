@@ -12,6 +12,7 @@
 <tr><th>{{ t('f_date') }}</th><td><span class="num" dir="ltr">{{ fdate(doc.date) }}</span></td></tr>
 {% if doc.partner_id %}<tr><th>{{ t('f_payer_partner' if doc.doc_type == 'CAPITAL_TRANSFER' else 'f_partner_id') }}</th><td>{{ names.partner.get(doc.partner_id) }}</td></tr>{% endif %}
 {% if doc.partner2_id %}<tr><th>{{ t('f_receiver_partner') }}</th><td>{{ names.partner.get(doc.partner2_id) }}</td></tr>{% endif %}
+{% if doc.supplier_id %}<tr><th>{{ t('f_supplier_id') }}</th><td><a href="/reports/ledger?code=210{{ '%02d' % doc.supplier_id }}">{{ names.supplier.get(doc.supplier_id) }}</a></td></tr>{% endif %}
 {% if doc.customer_id %}<tr><th>{{ t('f_customer_id') }}</th><td>{{ names.customer.get(doc.customer_id) }}</td></tr>{% endif %}
 {% if doc.project_id %}<tr><th>{{ t('f_project_id') }}</th><td>{{ names.project.get(doc.project_id) }}</td></tr>{% endif %}
 {% if asset %}<tr><th>{{ t('f_asset_id') }}</th><td>{{ asset.name }}</td></tr>{% endif %}
@@ -22,6 +23,7 @@
 {% if doc.quantity %}<tr><th>{{ t('f_quantity') }}</th><td><span class="num" dir="ltr">{{ qty(doc.quantity) }}</span></td></tr>{% endif %}
 {% if doc.unit_price %}<tr><th>{{ t('f_unit_price') }}</th><td>{{ m(doc.unit_price) }}</td></tr>{% endif %}
 {% if doc.doc_type not in ('PRODUCTION',) %}<tr><th>{{ t(field_label(doc.doc_type, 'amount') if doc.doc_type in ('ASSET_DISPOSAL','CAPITAL_CALL','TRANSFER','RECEIPT') else 'f_amount') }}</th><td data-testid="doc-amount">{{ m(doc.amount) }}</td></tr>{% endif %}
+{% if doc.doc_type == 'PURCHASE' %}<tr><th>{{ t('f_paid_now') }}</th><td>{{ m(doc.paid) }}</td></tr><tr><th>{{ t('col_debt_remaining') }}</th><td class="{{ 'neg' if doc.amount > doc.paid }}" data-testid="doc-debt">{{ m(doc.amount - doc.paid) }}</td></tr>{% endif %}
 {% if doc.fee %}<tr><th>{{ t('f_fee') }}</th><td>{{ m(doc.fee) }}</td></tr>{% endif %}
 {% if doc.supplier %}<tr><th>{{ t('f_supplier') }}</th><td>{{ doc.supplier }}</td></tr>{% endif %}
 {% if doc.capital_call_id %}<tr><th>{{ t('f_capital_call_id') }}</th><td><a href="/documents/{{ doc.capital_call_id }}">#{{ doc.capital_call_id }}</a></td></tr>{% endif %}
@@ -29,6 +31,9 @@
 {% if doc.attachment %}<tr><th>{{ t('f_attachment') }}</th><td><a href="/documents/{{ doc.id }}/attachment" target="_blank">{{ doc.attachment_name or t('f_attachment') }}</a></td></tr>{% endif %}
 <tr><th>{{ t('col_created') }}</th><td>{{ names.user.get(doc.created_by, '') }} · {{ doc.created_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>
 </table>
+{% if doc.items %}<h3>{{ t('f_items') }}</h3><table data-testid="doc-items"><thead><tr><th>{{ t('f_item_id') }}</th><th class="n">{{ t('f_quantity') }}</th>{% if doc.doc_type == 'PURCHASE' %}<th class="n">{{ t('f_unit_price') }}</th>{% endif %}<th class="n">{{ t('f_line_total') if doc.doc_type == 'PURCHASE' else t('col_materials_cost') }}</th></tr></thead><tbody>
+{% for it in doc.items %}{% set item = names.item.get(it.item_id) %}<tr><td>{{ item.name if item else it.item_id }}</td><td class="n"><span class="num" dir="ltr">{{ qty(it.quantity) }}</span> {{ item.unit if item else '' }}</td>{% if doc.doc_type == 'PURCHASE' %}<td class="n">{{ m(it.unit_price) }}</td>{% endif %}<td class="n">{% if doc.lines or doc.doc_type == 'PURCHASE' %}{{ m(it.amount) }}{% else %}—{% endif %}</td></tr>{% endfor %}
+</tbody><tfoot><tr><th colspan="{{ 3 if doc.doc_type == 'PURCHASE' else 2 }}">{{ t('total') }}</th><th class="n">{{ m(doc.items|sum(attribute='amount')) }}</th></tr></tfoot></table>{% endif %}
 {% if doc.call_shares %}<h3>{{ t('call_shares') }}</h3><table><thead><tr><th>{{ t('f_partner_id') }}</th><th class="n">{{ t('f_amount') }}</th><th class="n">{{ t('col_paid') }}</th></tr></thead><tbody>
 {% for cs in doc.call_shares %}{% set paid = linked|selectattr('status','equalto','POSTED')|selectattr('partner_id','equalto',cs.partner_id)|map(attribute='amount')|sum %}<tr><td>{{ names.partner.get(cs.partner_id) }}</td><td class="n">{{ m(cs.amount) }}</td><td class="n">{{ m(paid) }}</td></tr>{% endfor %}</tbody></table>
 {% if doc.status == 'POSTED' and user.role in ('admin','accountant') %}<p><a class="btn" href="/documents/new/CONTRIBUTION">+ {{ t('doc_CONTRIBUTION') }}</a></p>{% endif %}

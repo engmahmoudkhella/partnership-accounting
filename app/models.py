@@ -115,6 +115,37 @@ class Customer(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class Supplier(Base):
+    __tablename__ = "suppliers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    phone: Mapped[str] = mapped_column(String(50), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Item(Base):
+    """A stock item kept in the store (rice, meat, oil...). Quantities are thousandths of ``unit``."""
+    __tablename__ = "items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    unit: Mapped[str] = mapped_column(String(30), default="كغ")
+    category: Mapped[str] = mapped_column(String(30), default="food")  # expense category when used
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class RecipeLine(Base):
+    """How much of an item one unit produced by a project uses (e.g. one meal uses 0.400 kg rice)."""
+    __tablename__ = "recipe_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"))
+    item_id: Mapped[int] = mapped_column(ForeignKey("items.id"))
+    quantity: Mapped[int] = mapped_column(Integer)  # thousandths of the item unit per produced unit
+
+    __table_args__ = (UniqueConstraint("project_id", "item_id"),)
+
+
 class Asset(Base):
     __tablename__ = "assets"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -143,11 +174,14 @@ DOC_TYPES = (
     "TRANSFER",
     "DISTRIBUTION",
     "PRODUCTION",
+    "PURCHASE",
+    "SUPPLIER_PAYMENT",
+    "STOCK_ISSUE",
 )
 # document types that never create ledger lines
 MEMO_TYPES = ("CAPITAL_CALL", "PRODUCTION")
 # document types that can require approval of all partners
-APPROVAL_TYPES = ("EXPENSE", "ASSET_PURCHASE")
+APPROVAL_TYPES = ("EXPENSE", "ASSET_PURCHASE", "PURCHASE")
 
 STATUSES = ("PENDING", "POSTED", "REJECTED", "VOID")
 
@@ -192,6 +226,8 @@ class Document(Base):
     capital_call_id: Mapped[int | None] = mapped_column(ForeignKey("documents.id"), nullable=True)
     # who paid an expense / asset when not from a money account
     paid_by_partner_id: Mapped[int | None] = mapped_column(ForeignKey("partners.id"), nullable=True)
+    supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id"), nullable=True)
+    paid: Mapped[int] = mapped_column(Integer, default=0)  # purchase: paid now; the rest is owed to the supplier
 
     attachment: Mapped[str] = mapped_column(String(300), default="")
     attachment_name: Mapped[str] = mapped_column(String(300), default="")
@@ -207,8 +243,21 @@ class Document(Base):
     opening_lines = relationship("OpeningLine", cascade="all, delete-orphan", order_by="OpeningLine.id")
     call_shares = relationship("CallShare", cascade="all, delete-orphan", order_by="CallShare.partner_id")
     approvals = relationship("Approval", cascade="all, delete-orphan", order_by="Approval.id")
+    items = relationship("DocumentItem", cascade="all, delete-orphan", order_by="DocumentItem.id")
 
     __table_args__ = (UniqueConstraint("doc_type", "number"),)
+
+
+class DocumentItem(Base):
+    """Item lines of a purchase (quantity x unit price) or of a stock issue / production
+    (quantity; ``amount`` = cost taken out of stock at average cost)."""
+    __tablename__ = "document_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), index=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("items.id"))
+    quantity: Mapped[int] = mapped_column(Integer)  # thousandths
+    unit_price: Mapped[int] = mapped_column(Integer, default=0)
+    amount: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class OpeningLine(Base):
@@ -267,6 +316,9 @@ class JournalLine(Base):
     money_account_id: Mapped[int | None] = mapped_column(ForeignKey("money_accounts.id"), nullable=True)
     asset_id: Mapped[int | None] = mapped_column(ForeignKey("assets.id"), nullable=True)
     category: Mapped[str] = mapped_column(String(30), default="")
+    item_id: Mapped[int | None] = mapped_column(ForeignKey("items.id"), nullable=True)
+    supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id"), nullable=True)
+    quantity: Mapped[int] = mapped_column(Integer, default=0)  # stock lines: + in / - out, thousandths
     debit: Mapped[int] = mapped_column(Integer, default=0)
     credit: Mapped[int] = mapped_column(Integer, default=0)
 

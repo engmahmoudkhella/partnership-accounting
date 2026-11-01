@@ -30,10 +30,16 @@ FORM_FIELDS: dict[str, list[tuple[str, str, bool]]] = {
                  ("amount", "money", True), ("fee", "money0", False)],
     "DISTRIBUTION": [("money_account_id", "money_account", True), ("amount", "money", True)],
     "PRODUCTION": [("project_id", "project", True), ("quantity", "qty", True)],
+    "PURCHASE": [("supplier_id", "supplier", True), ("project_id", "project", False), ("items", "items", True),
+                 ("paid", "money0", False), ("pay_source", "paysource_opt", False)],
+    "SUPPLIER_PAYMENT": [("supplier_id", "supplier", True), ("amount", "money", True),
+                         ("pay_source", "paysource", True)],
+    "STOCK_ISSUE": [("project_id", "project", True), ("items", "items", True)],
 }
+MAX_ITEM_ROWS = 40
 
 ATTACHMENT_TYPES = ("EXPENSE", "ASSET_PURCHASE", "INVOICE", "RECEIPT", "CONTRIBUTION", "TRANSFER",
-                    "DISTRIBUTION", "ASSET_DISPOSAL", "CAPITAL_TRANSFER")
+                    "DISTRIBUTION", "ASSET_DISPOSAL", "CAPITAL_TRANSFER", "PURCHASE", "SUPPLIER_PAYMENT")
 
 # label key for a field, per document type when it differs
 FIELD_LABELS = {
@@ -46,6 +52,8 @@ FIELD_LABELS = {
     ("CAPITAL_CALL", "amount"): "f_call_total",
     ("TRANSFER", "amount"): "f_amount_sent",
     ("RECEIPT", "amount"): "f_amount_settled",
+    ("PURCHASE", "paid"): "f_paid_now",
+    ("SUPPLIER_PAYMENT", "amount"): "f_amount_paid",
 }
 
 
@@ -104,7 +112,25 @@ def parse_document_form(doc_type: str, form) -> tuple[dict, dict, dict]:
                     data[field] = raw.strip()[:200]
             elif kind == "category":
                 data[field] = raw.strip()
-            elif kind == "paysource":
+            elif kind == "items":
+                rows = []
+                priced = doc_type == "PURCHASE"
+                for n in range(MAX_ITEM_ROWS):
+                    iid, q, pr = (form.get(f"item_id_{n}") or ""), (form.get(f"qty_{n}") or ""), (form.get(f"price_{n}") or "")
+                    if not (str(iid).strip() or str(q).strip() or str(pr).strip()):
+                        continue
+                    row = {"item_id": _int_or_none(iid), "quantity": parse_quantity(q)}
+                    if priced:
+                        row["unit_price"] = parse_money(pr)
+                    if row["item_id"] is None:
+                        raise NumberError("err_item_required")
+                    rows.append(row)
+                if not rows:
+                    raise NumberError("err_items_required")
+                data["items"] = rows
+            elif kind == "paysource_opt" and not data.get("paid"):
+                data["money_account_id"] = data["paid_by_partner_id"] = None
+            elif kind in ("paysource", "paysource_opt"):
                 src = form.get("pay_source", "account")
                 if src == "partner":
                     data["paid_by_partner_id"] = _int_or_none(form.get("paid_by_partner_id"))

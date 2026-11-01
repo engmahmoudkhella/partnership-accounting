@@ -224,6 +224,52 @@ async function waitForServer() {
     await page.screenshot({ path: path.join(SHOTS, "15-trial.png"), fullPage: true });
     await page.goto(BASE + "/");
 
+    console.log("9d. Stock: suppliers, items, purchase on credit, recipe, production");
+    await page.goto(BASE + "/master/supplier");
+    await page.fill("[data-testid=m-name]", "شريف السوافيري");
+    await page.click("[data-testid=m-save]");
+    for (const [n, u, cat] of [["لحم عجل", "كغ", "meat"], ["رز", "كغ", "food"]]) {
+      await page.goto(BASE + "/master/item");
+      await page.fill("[data-testid=m-name]", n);
+      await page.fill("[data-testid=m-unit]", u);
+      await page.selectOption("[data-testid=m-category]", cat);
+      await page.click("[data-testid=m-save]");
+    }
+    await page.goto(BASE + "/documents/new/PURCHASE");
+    await page.selectOption("[data-testid=f-supplier_id]", { index: 1 });
+    await page.selectOption("[data-testid=item-0]", { label: "لحم عجل (كغ)" });
+    await page.fill("[data-testid=qty-0]", "٥٠");
+    await page.fill("[data-testid=price-0]", "٣٥");
+    await page.selectOption("[data-testid=item-1]", { label: "رز (كغ)" });
+    await page.fill("[data-testid=qty-1]", "100");
+    await page.fill("[data-testid=price-1]", "9");
+    await page.fill("[data-testid=f-paid]", "1000");
+    check((await page.textContent("#purchase-total")).includes("2,650.00"), "live purchase total 2,650.00");
+    check((await page.textContent("#purchase-debt")).includes("1,650.00"), "live remaining debt 1,650.00");
+    await page.selectOption("[data-testid=f-money_account_id]", { label: "الصندوق" });
+    await page.click("[data-testid=save]");
+    check((await page.textContent("[data-testid=doc-debt]")).includes("1,650.00"), "purchase saved, debt to supplier");
+    await page.goto(BASE + "/inventory");
+    const proj = await page.locator("[data-testid^=recipe-save-]").first().getAttribute("data-testid");
+    const pid = proj.replace("recipe-save-", "");
+    const rin = page.locator(`[data-testid^=r-${pid}-]`);
+    await rin.nth(0).fill("0.150");
+    await rin.nth(1).fill("٠٫٤");
+    await page.click(`[data-testid=recipe-save-${pid}]`);
+    check((await page.textContent(`[data-testid=coverage-${pid}]`)).includes("250"), "stock covers 250 meals");
+    await page.goto(BASE + "/documents/new/PRODUCTION");
+    await page.selectOption("[data-testid=f-project_id]", pid);
+    check(await page.locator(`.recipe-info[data-project="${pid}"]`).isVisible(), "recipe shown on production form");
+    await page.fill("[data-testid=f-quantity]", "100");
+    await page.click("[data-testid=save]");
+    check((await page.textContent(".voucher-line")).includes("إذن صرف"), "production took the recipe out of stock");
+    await page.goto(BASE + "/inventory");
+    check((await page.textContent(`[data-testid=unit-cost-${pid}]`)).includes("8.85"), "cost per meal 8.85");
+    await page.screenshot({ path: path.join(SHOTS, "16-inventory.png"), fullPage: true });
+    await page.goto(BASE + "/reports/trial");
+    check((await page.textContent("[data-testid=trial-status]")).includes("✓"), "books balanced with stock and suppliers");
+    await page.goto(BASE + "/");
+
     console.log("10. Switch to English");
     await page.click("[data-testid=lang-switch]");
     check((await page.getAttribute("html", "dir")) === "ltr", "English page is left-to-right");

@@ -24,10 +24,25 @@
   </label>
   {% elif kind == 'text' %}
   <label>{{ label }}{% if required %} *{% endif %}<input type="text" name="{{ field }}" value="{{ values.get(field,'') }}" maxlength="200" data-testid="f-{{ field }}"></label>
+  {% elif kind == 'items' %}
+  {% set priced = doc_type == 'PURCHASE' %}
+  {% set ns = namespace(last=-1) %}{% for n in range(40) %}{% if values.get('item_id_%d' % n) or values.get('qty_%d' % n) %}{% set ns.last = n %}{% endif %}{% endfor %}
+  <fieldset class="items-box"><legend>{{ t('f_items') }} *</legend>
+  <div class="scroll"><table class="item-rows" id="item-rows" data-testid="item-rows"><thead><tr><th>{{ t('f_item_id') }}</th><th>{{ t('f_quantity') }}</th>{% if priced %}<th>{{ t('f_unit_price') }}</th><th class="n">{{ t('f_line_total') }}</th>{% else %}<th class="n">{{ t('col_in_stock') }}</th>{% endif %}</tr></thead><tbody>
+  {% for n in range([3, ns.last + 2]|max) %}<tr>
+    <td><select name="item_id_{{ n }}" class="item-sel" data-testid="item-{{ n }}"><option value="">—</option>{% for o in opts.item %}<option value="{{ o.id }}" data-unit="{{ o.unit }}" data-stock="{{ qty(extra.stock.get(o.id, 0)) if extra.get('stock') else '' }}" {{ 'selected' if values.get('item_id_%d' % n) == o.id|string }}>{{ o.name }} ({{ o.unit }})</option>{% endfor %}</select></td>
+    <td><input type="text" inputmode="decimal" autocomplete="off" name="qty_{{ n }}" value="{{ values.get('qty_%d' % n, '') }}" dir="ltr" class="numin it-qty" data-kind="qty" data-testid="qty-{{ n }}"><small class="preview"></small></td>
+    {% if priced %}<td><input type="text" inputmode="decimal" autocomplete="off" name="price_{{ n }}" value="{{ values.get('price_%d' % n, '') }}" dir="ltr" class="numin it-price" data-kind="money" data-testid="price-{{ n }}"><small class="preview"></small></td><td class="n"><span class="num it-total" dir="ltr">—</span></td>
+    {% else %}<td class="n"><span class="num it-stock" dir="ltr"></span></td>{% endif %}
+  </tr>{% endfor %}
+  </tbody></table></div>
+  <button type="button" class="small" id="add-item-row">+ {{ t('add_row') }}</button>
+  {% if priced %}<p class="note" id="purchase-sum">{{ t('f_total') }}: <b class="num" dir="ltr" id="purchase-total" data-testid="purchase-total">—</b> · {{ t('col_debt_remaining') }}: <b class="num neg" dir="ltr" id="purchase-debt">—</b></p>{% endif %}
+  </fieldset>
   {% elif kind == 'category' %}
   <label>{{ label }} *<select name="category" data-testid="f-category"><option value="">—</option>{% for c in opts.category %}<option value="{{ c }}" {{ 'selected' if values.get('category')==c }}>{{ t('cat_' + c) }}</option>{% endfor %}</select></label>
-  {% elif kind == 'paysource' %}
-  <fieldset class="paysource"><legend>{{ t('f_pay_source') }} *</legend>
+  {% elif kind in ('paysource', 'paysource_opt') %}
+  <fieldset class="paysource"><legend>{{ t('f_pay_source') }}{% if kind == 'paysource' %} *{% endif %}</legend>{% if kind == 'paysource_opt' %}<small class="muted">{{ t('help_pay_source_opt') }}</small><br>{% endif %}
     <label class="inline"><input type="radio" name="pay_source" value="account" {{ 'checked' if values.get('pay_source','account')=='account' }} data-testid="pay-account"> {{ t('pay_from_account') }}</label>
     <label class="inline"><input type="radio" name="pay_source" value="partner" {{ 'checked' if values.get('pay_source')=='partner' }} data-testid="pay-partner"> {{ t('pay_by_partner') }}</label>
     <label class="ps-account">{{ t('f_money_account_id') }}<select name="money_account_id" data-testid="f-money_account_id"><option value="">—</option>{% for a in opts.money_account %}<option value="{{ a.id }}" {{ 'selected' if values.get('money_account_id')==a.id|string }}>{{ a.name }}</option>{% endfor %}</select></label>
@@ -42,6 +57,7 @@
   {% endif %}
   {{ err(errors, field) }}
 {% endfor %}
+{% if doc_type == 'PRODUCTION' and extra.get('recipes') %}<div class="note" data-testid="recipe-note">{% for pid, r in extra.recipes.items() %}<div class="recipe-info" data-project="{{ pid }}"><b>{{ t('recipe_per_unit') }} {{ r.unit_name or '' }}:</b> {% for item, q in r.lines %}{{ item.name }} <span class="num" dir="ltr">{{ qty(q) }}</span> {{ item.unit }}{{ '، ' if not loop.last }}{% endfor %} · {{ t('stock_covers') }} <b class="num">{{ num(r.units or 0) }}</b> {{ r.unit_name or '' }}</div>{% endfor %}<small class="muted">{{ t('help_production_recipe') }}</small></div>{% endif %}
 {% if doc_type == 'INVOICE' %}<p class="note">{{ t('f_total') }}: <b><span class="num" dir="ltr" id="invoice-total" data-testid="invoice-total">—</span></b></p>{% endif %}
 {% if doc_type == 'DISTRIBUTION' and extra.get('shares') %}
 <div class="note"><b>{{ t('dist_split') }}</b><ul id="dist-split" data-shares='{{ extra.shares|tojson }}' data-names='{{ extra.share_names|tojson }}'></ul></div>
