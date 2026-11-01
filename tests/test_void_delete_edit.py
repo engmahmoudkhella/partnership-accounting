@@ -757,3 +757,20 @@ def test_anonymous_ledger_is_not_admin(opened):
     assert code(anon.lock_month, "2026-10") == "err_forbidden"
     assert code(anon.create_document, "PRODUCTION", D(2), {"project_id": w.kitchen.id, "quantity": 1}) \
         == "err_forbidden"
+
+
+def test_rounded_thirds_in_percent_mode_are_saved_exactly(world):
+    w = world
+    p = 166_667  # 16.6667%
+    v = w.L.create_share_version(dt.date(2026, 2, 1), {w.contractor.id: 500_000, w.mahmoud.id: p, w.momen.id: p,
+                                                       w.ahmad.id: p}, mode="percent")
+    assert v.mode == "ratio"
+    assert {ln.partner_id: ln.weight for ln in v.lines} == {w.contractor.id: 3, w.mahmoud.id: 1, w.momen.id: 1,
+                                                            w.ahmad.id: 1}
+    # 33.3333 x 3 = 99.9999 -> exact thirds as well
+    assert w.L.exact_ratio_from_rounded_percents({1: 333_333, 2: 333_333, 3: 333_333}) == {1: 1, 2: 1, 3: 1}
+    # a real mistake is still refused
+    assert code(w.L.create_share_version, dt.date(2026, 3, 1), {w.contractor.id: 500_000, w.mahmoud.id: 201_000,
+                                                                w.momen.id: 298_000, w.ahmad.id: 200_000},
+                mode="percent") == "err_shares_sum"
+    assert w.L.exact_ratio_from_rounded_percents({1: 500_000, 2: 166_667, 3: 166_667, 4: 166_668}) is None

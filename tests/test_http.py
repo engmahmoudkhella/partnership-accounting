@@ -328,12 +328,16 @@ def test_shares_percent_must_total_100_via_form(ready):
     c = ready
     ids = c.ids["partners"]
     form = {"effective_date": "2026-10-15", "mode": "percent"}
-    form.update({f"share_{pid}": v for pid, v in zip(ids, ["50", "16.6667", "16.6667", "16.6667"])})
+    form.update({f"share_{pid}": v for pid, v in zip(ids, ["50", "16.6", "16.6", "16.6"])})
     r = c.post("/shares/new", form, page="/partners")
     assert "100% بالضبط" in r.text
-    form[f"share_{ids[3]}"] = "16.6666"
+    # 16.6667 x 3 + 50 = 100.0001 is accepted and saved as exact thirds (ratio 3:1:1:1)
+    form.update({f"share_{pid}": v for pid, v in zip(ids, ["50", "16.6667", "16.6667", "16.6667"])})
     r = c.post("/shares/new", form, page="/partners")
     assert "flash ok" in r.text
+    s = c.db()
+    v = s.scalars(select(ShareVersion).order_by(ShareVersion.effective_date.desc())).first()
+    assert v.mode == "ratio" and sorted(ln.weight for ln in v.lines) == [1, 1, 1, 3]
 
 
 # ------------------------------------------------------------------ roles over HTTP

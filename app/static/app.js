@@ -126,7 +126,14 @@
       });
       if (bad) { st.textContent = "—"; st.className = "num neg"; }
       else if (ratio) { st.textContent = fmtMinor(sum, 0); st.className = "num " + (sum > 0n ? "ok" : "neg"); }
-      else { st.textContent = fmtMinor(sum, 4) + "%"; st.className = "num " + (sum === 1000000n ? "ok" : "neg"); }
+      else {
+        // 16.6667 x 3 + 50 = 100.0001: within 4-decimal rounding, the server saves exact thirds
+        var n = BigInt(ws.filter(function (w) { return w > 0n; }).length), diff = sum - 1000000n;
+        if (diff < 0n) diff = -diff;
+        var near = sum !== 1000000n && n > 0n && 2n * diff <= n;
+        st.textContent = fmtMinor(sum, 4) + "%" + (near ? (AR ? " ≈ 100% (تُحفظ كنِسَب دقيقة بلا تقريب)" : " ≈ 100% (saved as exact fractions)") : "");
+        st.className = "num " + (sum === 1000000n || near ? "ok" : "neg");
+      }
     }
   }
   document.querySelectorAll("input[name=mode]").forEach(function (r) { r.addEventListener("change", update); });

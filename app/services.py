@@ -19,6 +19,8 @@ import datetime as dt
 import os
 from collections import defaultdict
 from dataclasses import dataclass
+from fractions import Fraction
+from math import lcm
 
 import bcrypt
 from sqlalchemy import func, select
@@ -200,6 +202,27 @@ class Ledger:
 
     # ---------------------------------------------------------------- shares
 
+    @staticmethod
+    def exact_ratio_from_rounded_percents(shares: dict[int, int]) -> dict[int, int] | None:
+        """Percentages typed rounded to 4 decimals (16.6667 + 16.6667 + 16.6667 + 50 = 100.0001) stand for
+        exact fractions (1/6, 1/6, 1/6, 1/2). Recover those fractions and return whole-number weights
+        (1, 1, 1, 3) so every partner gets exactly his share. None if the values do not snap cleanly."""
+        nonzero = {pid: w for pid, w in shares.items() if w > 0}
+        if not nonzero:
+            return None
+        if 2 * abs(sum(nonzero.values()) - PPM_TOTAL) > len(nonzero):  # beyond 4-decimal rounding
+            return None
+        fracs = {}
+        for pid, w in nonzero.items():
+            f = Fraction(w, PPM_TOTAL).limit_denominator(1000)
+            if 2 * abs(f * PPM_TOTAL - w) > 1:  # each value must be that fraction rounded to 4 decimals
+                return None
+            fracs[pid] = f
+        if sum(fracs.values()) != 1:
+            return None
+        d = lcm(*(f.denominator for f in fracs.values()))
+        return {pid: int(fracs[pid] * d) if pid in fracs else 0 for pid in shares}
+
     def share_versions(self) -> list[ShareVersion]:
         return list(self.s.scalars(select(ShareVersion).order_by(ShareVersion.effective_date)))
 
@@ -240,7 +263,11 @@ class Ledger:
                 raise BusinessError("err_percent_over_100")
         total = sum(shares.values())
         if mode == "percent" and total != PPM_TOTAL:
-            raise BusinessError("err_shares_sum", total=total)
+            exact = self.exact_ratio_from_rounded_percents(shares)
+            if exact is None:
+                raise BusinessError("err_shares_sum", total=total)
+            # e.g. 16.6667% x 3 + 50%: saved as the exact ratio 1:1:1:3 (thirds of 50%, no lost agorot)
+            shares, mode = exact, "ratio"
         if mode == "ratio" and total <= 0:
             raise BusinessError("err_ratio_zero")
         if self.s.scalar(select(ShareVersion.id).where(ShareVersion.effective_date == effective_date)):
