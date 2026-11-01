@@ -41,7 +41,7 @@
 </tbody><tfoot><tr><th colspan="{{ 3 if doc.doc_type == 'PURCHASE' else 2 }}">{{ t('total') }}</th><th class="n">{{ m(doc.items|sum(attribute='amount')) }}</th></tr></tfoot></table>{% endif %}
 {% if doc.call_shares %}<h3>{{ t('call_shares') }}</h3><table><thead><tr><th>{{ t('f_partner_id') }}</th><th class="n">{{ t('f_amount') }}</th><th class="n">{{ t('col_paid') }}</th></tr></thead><tbody>
 {% for cs in doc.call_shares %}{% set paid = linked|selectattr('status','equalto','POSTED')|selectattr('partner_id','equalto',cs.partner_id)|map(attribute='amount')|sum %}<tr><td>{{ names.partner.get(cs.partner_id) }}</td><td class="n">{{ m(cs.amount) }}</td><td class="n">{{ m(paid) }}</td></tr>{% endfor %}</tbody></table>
-{% if doc.status == 'POSTED' and user.role in ('admin','accountant') %}<p><a class="btn" href="/documents/new/CONTRIBUTION">+ {{ t('doc_CONTRIBUTION') }}</a></p>{% endif %}
+{% if doc.status == 'POSTED' and can('partners_money', 'add') %}<p><a class="btn" href="/documents/new/CONTRIBUTION">+ {{ t('doc_CONTRIBUTION') }}</a></p>{% endif %}
 {% endif %}
 </section>
 <section class="card">
@@ -63,21 +63,20 @@
 <button name="decision" value="reject" class="danger" data-testid="reject">{{ t('btn_reject') }}</button>
 </form>
 {% endif %}
-{% if doc.status == 'PENDING' and user.role in ('admin','accountant') and approvers and (doc.approvals|selectattr('decision','equalto','approve')|list|length) >= approvers|length %}
+{% if doc.status == 'PENDING' and can_doc(doc.doc_type, 'edit') and approvers and (doc.approvals|selectattr('decision','equalto','approve')|list|length) >= approvers|length %}
 <form method="post" action="/documents/{{ doc.id }}/post">{{ csrf_field() }}<button class="primary">{{ t('btn_post') }}</button></form>
 {% endif %}
 </section>
 </div>
 
 {% set own = doc.created_by == user.id %}
-{% set can_edit = (user.role in ('admin','accountant') and doc.status in ('POSTED','PENDING','REJECTED')) or (user.role == 'partner' and own and doc.status in ('PENDING','REJECTED')) %}
-{% set can_delete = doc.status in ('PENDING','REJECTED') and (user.role in ('admin','accountant') or (user.role == 'partner' and own)) %}
-{% if not locked and doc.doc_type != 'OPENING' and (can_edit or can_delete) %}
+{% set can_edit = may.edit %}{% set can_delete = may.delete %}
+{% if not locked and doc.doc_type != 'OPENING' and (can_edit or can_delete or may.void) %}
 <section class="card actions-card">
 {% if can_edit %}
 <a class="btn" href="/documents/{{ doc.id }}/edit" data-testid="edit">{{ t('btn_edit') }}</a>
 {% endif %}
-{% if doc.status == 'POSTED' and user.role in ('admin','accountant') %}
+{% if may.void %}
 <form method="post" action="/documents/{{ doc.id }}/void" class="inline-form confirm" data-confirm="{{ t('confirm_void') }}">{{ csrf_field() }}
 <input name="reason" required minlength="3" placeholder="{{ t('f_void_reason') }}" data-testid="void-reason">
 <button class="danger" data-testid="void">{{ t('btn_void') }}</button></form>

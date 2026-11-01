@@ -15,13 +15,13 @@
 <td class="nowrap">{% if r.next %}<span class="num" dir="ltr">{{ fdate(r.next) }}</span>{% elif r.done >= c.months %}<span class="ok">{{ t('contract_done') }}</span>{% else %}<span class="muted">{{ t('contract_stopped') }}</span>{% endif %}
 {% if r.error and c.active %}<div class="field-error" role="alert">{{ t('contract_waiting') }} {{ r.error }}</div>{% endif %}</td>
 <td class="n">{% if c.currency == 'USD' %}<span class="num" dir="ltr">{{ usd(r.total) }}</span>{% else %}{{ m(r.total) }}{% endif %}</td>
-<td>{% if user.role in ('admin','accountant') %}
-{% if c.active and r.done < c.months %}<form method="post" action="/contracts/{{ c.id }}/stop" class="inline confirm" data-confirm="{{ t('confirm_stop_contract') }}">{{ csrf_field() }}<button class="small">{{ t('btn_stop') }}</button></form>{% endif %}
-{% if r.done == 0 %}<form method="post" action="/contracts/{{ c.id }}/delete" class="inline confirm" data-confirm="{{ t('confirm_delete') }}">{{ csrf_field() }}<button class="danger small">{{ t('btn_delete') }}</button></form>{% endif %}
+<td>{% if can('contracts', 'edit') or can('contracts', 'delete') %}
+{% if c.active and r.done < c.months and can('contracts', 'edit') %}<form method="post" action="/contracts/{{ c.id }}/stop" class="inline confirm" data-confirm="{{ t('confirm_stop_contract') }}">{{ csrf_field() }}<button class="small">{{ t('btn_stop') }}</button></form>{% endif %}
+{% if r.done == 0 and can('contracts', 'delete') %}<form method="post" action="/contracts/{{ c.id }}/delete" class="inline confirm" data-confirm="{{ t('confirm_delete') }}">{{ csrf_field() }}<button class="danger small">{{ t('btn_delete') }}</button></form>{% endif %}
 {% endif %}</td></tr>
 {% else %}<tr><td colspan="8" class="muted">{{ t('empty') }}</td></tr>{% endfor %}
 </tbody></table></div></section>
-{% if user.role in ('admin','accountant') %}
+{% if can('contracts', 'add') %}
 <form method="post" action="/contracts/save" class="card form" data-testid="contract-form">{{ csrf_field() }}
 <h2>{{ t('contract_new') }}</h2>
 <fieldset class="ckind"><legend>{{ t('contract_kind') }} *</legend>

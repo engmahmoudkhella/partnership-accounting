@@ -46,24 +46,24 @@
     <div class="nav-group">{{ t('nav_g_daily') }}</div>
     {{ nav('/', 'nav_dashboard', 'home') }}
     {{ nav('/documents', 'nav_documents', 'list') }}
-    {{ nav('/inventory', 'nav_inventory', 'box') }}
-    {{ nav('/contracts', 'nav_contracts', 'repeat') }}
-    {{ nav('/quotes', 'nav_quotes', 'file', prefix='/quotes') }}
+    {% if can('purchases_stock') or can('production') %}{{ nav('/inventory', 'nav_inventory', 'box') }}{% endif %}
+    {% if can('contracts') %}{{ nav('/contracts', 'nav_contracts', 'repeat') }}{% endif %}
+    {% if can('sales') %}{{ nav('/quotes', 'nav_quotes', 'file', prefix='/quotes') }}{% endif %}
     {% call nav('/documents?awaiting=me', 'nav_approvals', 'check', extra='data-testid="nav-approvals"') %}{% if pending_count %}<span class="badge">{{ num(pending_count) }}</span>{% endif %}{% endcall %}
     <div class="nav-group">{{ t('nav_g_setup') }}</div>
-    {{ nav('/opening', 'nav_opening', 'flag') }}
-    {{ nav('/partners', 'nav_partners', 'users') }}
-    {{ nav('/master/project', 'nav_projects', 'folder') }}
+    {% if can('opening') %}{{ nav('/opening', 'nav_opening', 'flag') }}{% endif %}
+    {% if can('partners') %}{{ nav('/partners', 'nav_partners', 'users') }}{% endif %}
+    {% if can('master') %}{{ nav('/master/project', 'nav_projects', 'folder') }}
     {{ nav('/master/money_account', 'nav_accounts', 'wallet') }}
-    {{ nav('/rates', 'nav_rates', 'repeat') }}
     {{ nav('/master/customer', 'nav_customers', 'building') }}
     {{ nav('/master/supplier', 'nav_suppliers', 'users') }}
-    {{ nav('/master/item', 'nav_items', 'list') }}
-    {{ nav('/assets', 'nav_assets', 'box') }}
+    {{ nav('/master/item', 'nav_items', 'list') }}{% endif %}
+    {% if can('cash') %}{{ nav('/rates', 'nav_rates', 'repeat') }}{% endif %}
+    {% if can('assets') %}{{ nav('/assets', 'nav_assets', 'box') }}{% endif %}
     <div class="nav-group">{{ t('nav_g_control') }}</div>
-    {{ nav('/reports/partners', 'nav_reports', 'chart', prefix='/reports') }}
-    {{ nav('/months', 'nav_months', 'lock') }}
-    {{ nav('/audit', 'nav_audit', 'eye') }}
+    {% if can('reports') %}{{ nav('/reports/partners', 'nav_reports', 'chart', prefix='/reports') }}{% endif %}
+    {% if can('months') %}{{ nav('/months', 'nav_months', 'lock') }}{% endif %}
+    {% if can('audit') %}{{ nav('/audit', 'nav_audit', 'eye') }}{% endif %}
     {% if user.role == 'admin' %}
     <div class="nav-group">{{ t('nav_g_admin') }}</div>
     {{ nav('/users', 'nav_users', 'user') }}

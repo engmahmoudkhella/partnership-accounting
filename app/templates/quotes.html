@@ -7,7 +7,7 @@
 <form class="filters" method="get">
 <select name="status"><option value="">{{ t('all_statuses') }}</option>{% for st in ['OPEN','ACCEPTED','CANCELLED'] %}<option value="{{ st }}" {{ 'selected' if request.query_params.get('status')==st }}>{{ t('qs_' + st) }}</option>{% endfor %}</select>
 <button>{{ t('btn_filter') }}</button>
-{% if user.role in ('admin','accountant') %}<a class="btn primary" href="/quotes/new" data-testid="quote-new">+ {{ t('quote_new') }}</a>{% endif %}
+{% if can('sales', 'add') %}<a class="btn primary" href="/quotes/new" data-testid="quote-new">+ {{ t('quote_new') }}</a>{% endif %}
 </form>
 <section class="card"><div class="scroll"><table data-testid="quotes-table"><thead><tr><th>{{ t('col_number') }}</th><th>{{ t('f_date') }}</th><th>{{ t('f_customer_id') }}</th><th>{{ t('f_project_id') }}</th><th>{{ t('f_valid_until') }}</th><th class="n">{{ t('cm_total') }}</th><th>{{ t('col_status') }}</th></tr></thead><tbody>
 {% for q in quotes %}<tr class="{{ 'void' if q.status == 'CANCELLED' }}">

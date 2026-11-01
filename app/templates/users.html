@@ -1,10 +1,33 @@
 {% extends "base.html" %}
 {% from "macros.html" import csrf_field with context %}
-{% block title %}{{ t('nav_users') }}{% endblock %}
+{% block title %}{{ t('nav_users') }}<script>
+(function(){
+  const box = document.getElementById('perms'), role = document.getElementById('role-sel');
+  const presets = JSON.parse(box.dataset.presets), boxes = [...box.querySelectorAll('input[data-sec]')];
+  const own = box.querySelector('[name=own_only]');
+  function apply(p){ boxes.forEach(b => b.checked = (p.s[b.dataset.sec] || []).includes(b.dataset.act)); own.checked = !!p.own_only; }
+  function adminState(){ const a = role.value === 'admin'; box.querySelector('.perm-admin-note').hidden = !a; boxes.concat([own]).forEach(b => b.disabled = a); }
+  role.addEventListener('change', () => { apply(presets[role.value]); adminState(); });
+  box.addEventListener('change', e => {  // doing something needs seeing; no seeing means nothing else
+    const b = e.target; if (!b.dataset || !b.dataset.sec) return;
+    const row = boxes.filter(x => x.dataset.sec === b.dataset.sec);
+    if (b.checked && b.dataset.act !== 'view') row.forEach(x => { if (x.dataset.act === 'view') x.checked = true; });
+    if (!b.checked && b.dataset.act === 'view') row.forEach(x => x.checked = false);
+  });
+  box.querySelectorAll('[data-perm]').forEach(btn => btn.addEventListener('click', () => {
+    const k = btn.dataset.perm;
+    if (k === 'preset') return apply(presets[role.value]);
+    boxes.forEach(b => b.checked = k === 'all' || (k === 'view' && b.dataset.act === 'view'));
+    if (k !== 'all') own.checked = false;
+  }));
+  adminState();
+})();
+</script>
+{% endblock %}
 {% block content %}
 <h1>{{ t('nav_users') }}</h1>
 <section class="card"><div class="scroll"><table data-testid="users-table"><thead><tr><th>{{ t('f_full_name') }}</th><th>{{ t('f_username') }}</th><th>{{ t('f_role') }}</th><th>{{ t('f_partner_id') }}</th><th>{{ t('col_status') }}</th><th></th></tr></thead><tbody>
-{% for u in users %}<tr class="{{ 'inactive' if not u.active }}"><td>{{ u.full_name }}</td><td dir="ltr">{{ u.username }}</td><td>{{ t('role_' + u.role) }}</td><td>{{ u.partner.name if u.partner else '' }}</td><td>{{ t('active') if u.active else t('inactive') }}</td>
+{% for u in users %}<tr class="{{ 'inactive' if not u.active }}"><td>{{ u.full_name }}</td><td dir="ltr">{{ u.username }}</td><td>{{ t('role_' + u.role) }}{% if u.permissions and u.role != 'admin' %}<br><small class="muted">{{ t('perm_custom') }}</small>{% endif %}</td><td>{{ u.partner.name if u.partner else '' }}</td><td>{{ t('active') if u.active else t('inactive') }}</td>
 <td><a class="btn small" href="?edit={{ u.id }}">{{ t('btn_edit') }}</a>
 <form method="post" action="/users/{{ u.id }}/active" class="inline">{{ csrf_field() }}<input type="hidden" name="active" value="{{ '0' if u.active else '1' }}"><button class="small">{{ t('btn_deactivate') if u.active else t('btn_activate') }}</button></form>
 <form method="post" action="/users/{{ u.id }}/delete" class="inline confirm" data-confirm="{{ t('confirm_delete') }}">{{ csrf_field() }}<button class="danger small">{{ t('btn_delete') }}</button></form></td></tr>{% endfor %}
@@ -14,14 +37,47 @@
 {% if edit %}<input type="hidden" name="id" value="{{ edit.id }}">{% endif %}
 <label>{{ t('f_full_name') }} *<input name="full_name" value="{{ edit.full_name if edit else '' }}" required></label>
 <label>{{ t('f_username') }} *<input name="username" value="{{ edit.username if edit else '' }}" required dir="ltr" pattern="[a-zA-Z0-9._-]{3,64}"></label>
-<label>{{ t('f_role') }}<select name="role">{% for r in roles %}<option value="{{ r }}" {{ 'selected' if edit and edit.role == r }}>{{ t('role_' + r) }}</option>{% endfor %}</select></label>
+<label>{{ t('f_role') }}<select name="role" id="role-sel" data-testid="u-role">{% for r in roles %}<option value="{{ r }}" {{ 'selected' if (edit and edit.role == r) or (not edit and r == 'accountant') }}>{{ t('role_' + r) }}</option>{% endfor %}</select><small class="muted">{{ t('help_role_preset') }}</small></label>
 <label>{{ t('f_partner_id') }}<select name="partner_id"><option value="">—</option>{% for p in partners %}<option value="{{ p.id }}" {{ 'selected' if edit and edit.partner_id == p.id }}>{{ p.name }}</option>{% endfor %}</select></label>
 <small class="muted">{{ t('help_user_partner') }}</small>
 <label>{{ t('f_lang') }}<select name="lang"><option value="ar" {{ 'selected' if edit and edit.lang=='ar' }}>العربية</option><option value="en" {{ 'selected' if edit and edit.lang=='en' }}>English</option></select></label>
 <label>{{ t('f_digits') }}<select name="digits"><option value="latn">1,234.50</option><option value="arab" {{ 'selected' if edit and edit.digits=='arab' }}>١٬٢٣٤٫٥٠</option></select></label>
+<fieldset class="perms" id="perms" data-presets='{{ presets|tojson }}' data-testid="perms">
+<legend>{{ t('perm_title') }}</legend>
+<p class="muted perm-admin-note" hidden>{{ t('perm_admin_note') }}</p>
+<div class="scroll"><table class="perm-table"><thead><tr><th>{{ t('perm_section') }}</th><th class="c">{{ t('perm_view') }}</th><th class="c">{{ t('perm_add') }}</th><th class="c">{{ t('perm_edit') }}</th><th class="c">{{ t('perm_delete') }}</th></tr></thead><tbody>
+{% for sec, acts in sections %}<tr><th scope="row">{{ t('perm_s_' + sec) }}<br><small class="muted">{{ t('perm_h_' + sec) }}</small></th>
+{% for a in ['view', 'add', 'edit', 'delete'] %}{% set a2 = 'manage' if (sec == 'months' and a == 'edit') else a %}<td class="c">{% if a2 in acts %}<input type="checkbox" name="perm_{{ sec }}_{{ a2 }}" value="1" data-sec="{{ sec }}" data-act="{{ a2 }}" aria-label="{{ t('perm_s_' + sec) }} — {{ t('perm_' + a) }}" {{ 'checked' if a2 in cur_perms.s.get(sec, []) }} data-testid="p-{{ sec }}-{{ a2 }}">{% endif %}</td>{% endfor %}</tr>{% endfor %}
+</tbody></table></div>
+<label class="inline"><input type="checkbox" name="own_only" value="1" {{ 'checked' if cur_perms.own_only }} data-testid="p-own-only"> {{ t('perm_own_only') }}</label>
+<div class="actions"><button type="button" class="small" data-perm="all">{{ t('perm_all') }}</button><button type="button" class="small" data-perm="view">{{ t('perm_view_only') }}</button><button type="button" class="small" data-perm="none">{{ t('perm_none') }}</button><button type="button" class="small" data-perm="preset">{{ t('perm_reset') }}</button></div>
+</fieldset>
 <label>{{ t('f_password') }}{% if not edit %} *{% endif %}<input type="password" name="password" minlength="8" autocomplete="new-password" {{ 'required' if not edit }}></label>
 <label>{{ t('f_password2') }}<input type="password" name="password2" minlength="8" autocomplete="new-password"></label>
 {% if edit %}<small class="muted">{{ t('help_password_keep') }}</small>{% endif %}
 <button class="primary">{{ t('btn_save') }}</button>
 </form>
+<script>
+(function(){
+  const box = document.getElementById('perms'), role = document.getElementById('role-sel');
+  const presets = JSON.parse(box.dataset.presets), boxes = [...box.querySelectorAll('input[data-sec]')];
+  const own = box.querySelector('[name=own_only]');
+  function apply(p){ boxes.forEach(b => b.checked = (p.s[b.dataset.sec] || []).includes(b.dataset.act)); own.checked = !!p.own_only; }
+  function adminState(){ const a = role.value === 'admin'; box.querySelector('.perm-admin-note').hidden = !a; boxes.concat([own]).forEach(b => b.disabled = a); }
+  role.addEventListener('change', () => { apply(presets[role.value]); adminState(); });
+  box.addEventListener('change', e => {  // doing something needs seeing; no seeing means nothing else
+    const b = e.target; if (!b.dataset || !b.dataset.sec) return;
+    const row = boxes.filter(x => x.dataset.sec === b.dataset.sec);
+    if (b.checked && b.dataset.act !== 'view') row.forEach(x => { if (x.dataset.act === 'view') x.checked = true; });
+    if (!b.checked && b.dataset.act === 'view') row.forEach(x => x.checked = false);
+  });
+  box.querySelectorAll('[data-perm]').forEach(btn => btn.addEventListener('click', () => {
+    const k = btn.dataset.perm;
+    if (k === 'preset') return apply(presets[role.value]);
+    boxes.forEach(b => b.checked = k === 'all' || (k === 'view' && b.dataset.act === 'view'));
+    if (k !== 'all') own.checked = false;
+  }));
+  adminState();
+})();
+</script>
 {% endblock %}

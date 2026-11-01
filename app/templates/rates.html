@@ -6,13 +6,13 @@
 <p class="muted">{{ t('rates_help') }}</p>
 <div class="grid2">
 <section class="card"><h2>{{ t('rates_table') }}</h2>
-{% if user.role in ('admin','accountant') %}<form method="post" action="/rates/save" class="filters" data-testid="rate-form">{{ csrf_field() }}
+{% if can('cash', 'add') %}<form method="post" action="/rates/save" class="filters" data-testid="rate-form">{{ csrf_field() }}
 <label class="inline">{{ t('f_date') }} <input type="date" name="date" value="{{ today.isoformat() }}" required data-testid="rate-date"></label>
 <label class="inline">{{ t('f_rate') }} <input name="rate" inputmode="decimal" dir="ltr" size="8" required placeholder="3.65" data-testid="rate-value"></label>
 <button class="primary">{{ t('btn_save') }}</button></form>{% endif %}
 <div class="scroll"><table data-testid="rates-table"><thead><tr><th>{{ t('f_date') }}</th><th class="n">{{ t('col_usd_rate') }}</th><th></th></tr></thead><tbody>
 {% for r in rows %}<tr><td><span class="num" dir="ltr">{{ fdate(r.date) }}</span></td><td class="n"><span class="num" dir="ltr">{{ rate(r.rate) }}</span></td>
-<td>{% if user.role in ('admin','accountant') %}<form method="post" action="/rates/{{ r.id }}/delete" class="inline confirm" data-confirm="{{ t('confirm_delete') }}">{{ csrf_field() }}<button class="danger small">{{ t('btn_delete') }}</button></form>{% endif %}</td></tr>
+<td>{% if can('cash', 'delete') %}<form method="post" action="/rates/{{ r.id }}/delete" class="inline confirm" data-confirm="{{ t('confirm_delete') }}">{{ csrf_field() }}<button class="danger small">{{ t('btn_delete') }}</button></form>{% endif %}</td></tr>
 {% else %}<tr><td colspan="3" class="muted">{{ t('empty') }}{% if today_rate %} · {{ t('fx_rate_last') }}: <span class="num" dir="ltr">{{ rate(today_rate) }}</span>{% endif %}</td></tr>{% endfor %}
 </tbody></table></div></section>
 
@@ -26,7 +26,7 @@
 <td class="n {{ 'ok' if r.diff > 0 else 'neg' }}">{{ ('+' if r.diff > 0 else '') }}{{ m(r.diff) }}</td></tr>
 {% else %}<tr><td colspan="5" class="muted">{{ t('reval_nothing') if sel_rate else t('err_rate_required') }}</td></tr>{% endfor %}
 </tbody>{% if preview %}<tfoot><tr><th colspan="4">{{ t('reval_net') }}</th><th class="n">{{ m(preview|sum(attribute='diff')) }}</th></tr></tfoot>{% endif %}</table></div>
-{% if preview and user.role in ('admin','accountant') %}<form method="post" action="/documents/new/FX_REVALUATION" class="confirm" data-confirm="{{ t('confirm_reval') }}" data-testid="reval-form">{{ csrf_field() }}
+{% if preview and can('cash', 'add') %}<form method="post" action="/documents/new/FX_REVALUATION" class="confirm" data-confirm="{{ t('confirm_reval') }}" data-testid="reval-form">{{ csrf_field() }}
 <input type="hidden" name="date" value="{{ d.isoformat() }}"><input type="hidden" name="rate" value="{{ N.rate_input_value(sel_rate) }}">
 <button class="primary" data-testid="reval-post">{{ t('btn_post_reval') }}</button></form>{% endif %}
 </section>

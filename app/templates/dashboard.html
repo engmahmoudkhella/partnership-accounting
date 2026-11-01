@@ -9,15 +9,13 @@
 <ol class="steps">{% for key, done, url in setup_steps %}<li class="{{ 'done' if done }}"><a href="{{ url }}">{{ t(key) }}</a> {% if done %}✓{% endif %}</li>{% endfor %}</ol>
 </div>
 {% endif %}
-{% if has_opening and user.role in ('admin','accountant','partner') %}
+{% set ns_q = namespace(items=[]) %}{% for dt in ['CONTRIBUTION','PURCHASE','PRODUCTION','STOCK_ISSUE','STOCK_RETURN','STOCK_COUNT','EXPENSE','INVOICE','RECEIPT','SUPPLIER_PAYMENT','TRANSFER','ASSET_PURCHASE','CAPITAL_CALL','DISTRIBUTION'] %}{% if can_doc(dt, 'add') %}{% set ns_q.items = ns_q.items + [dt] %}{% endif %}{% endfor %}
+{% if has_opening and ns_q.items %}
 <section class="quick" aria-label="{{ t('quick_new') }}"><div class="quick-title">{{ t('quick_new') }}</div><div class="actions">
-{% if user.role in ('admin','accountant') %}
-{% for dt in ['CONTRIBUTION','PURCHASE','PRODUCTION','STOCK_ISSUE','STOCK_RETURN','STOCK_COUNT','EXPENSE','INVOICE','RECEIPT','SUPPLIER_PAYMENT','TRANSFER','ASSET_PURCHASE','CAPITAL_CALL','DISTRIBUTION'] %}<a class="btn chip" href="/documents/new/{{ dt }}">+ {{ t('doc_' + dt) }}</a>{% endfor %}
-{% else %}
-<a class="btn chip" href="/documents/new/EXPENSE">+ {{ t('doc_EXPENSE') }}</a><a class="btn chip" href="/documents/new/PRODUCTION">+ {{ t('doc_PRODUCTION') }}</a>
-{% endif %}
+{% for dt in ns_q.items %}<a class="btn chip" href="/documents/new/{{ dt }}">+ {{ t('doc_' + dt) }}</a>{% endfor %}
 </div></section>
 {% endif %}
+{% if can('reports') %}
 <div class="tiles">
 <div class="tile t-cash"><div class="label">{{ t('tile_cash') }}</div><div class="value">{{ m(tb.cash) }}</div></div>
 <div class="tile t-recv"><div class="label">{{ t('tile_receivable') }}</div><div class="value">{{ m(tb.receivable) }}</div></div>
@@ -49,6 +47,7 @@
 <div class="scroll"><table><thead><tr><th>{{ t('f_project_id') }}</th><th class="n">{{ t('col_revenue') }}</th><th class="n">{{ t('col_expenses') }}</th><th class="n">{{ t('col_net') }}</th></tr></thead><tbody>
 {% for r in projects %}<tr><td>{{ r.project.name if r.project else t('overhead') }}</td><td class="n">{{ m(r.revenue + r.gain) }}</td><td class="n">{{ m(r.expenses + r.loss) }}</td><td class="n {{ 'neg' if r.net < 0 }}">{{ m(r.net) }}</td></tr>{% endfor %}
 </tbody></table></div></section>
+{% endif %}
 {% endif %}
 <section class="card"><h2>{{ t('dash_recent') }}</h2>
 <div class="scroll"><table><thead><tr><th>{{ t('f_date') }}</th><th>{{ t('col_type') }}</th><th>{{ t('col_number') }}</th><th>{{ t('f_description') }}</th><th class="n">{{ t('f_amount') }}</th><th>{{ t('col_status') }}</th></tr></thead><tbody>

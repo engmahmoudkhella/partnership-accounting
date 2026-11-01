@@ -62,6 +62,7 @@ from .models import (
     User,
     utcnow,
 )
+from . import permissions as PERM
 from .numbers import PPM_TOTAL, allocate, convert, line_total, round_half_up_div
 from .numbers import format_quantity as N_format_quantity
 
@@ -155,6 +156,25 @@ class Ledger:
         if self.role not in roles:
             raise BusinessError("err_forbidden")
 
+    def can(self, section: str, action: str = "view") -> bool:
+        if self.user is None:
+            return self.system
+        return PERM.can(self.user, section, action)
+
+    def allow(self, section: str, action: str):
+        """Raise unless the user may do ``action`` in ``section`` (see permissions.py)."""
+        if not self.can(section, action):
+            raise BusinessError("err_forbidden")
+
+    def _own_ok(self, doc: Document) -> bool:
+        """A user limited to his own documents may only touch what he created
+        (a partner: and only before it is posted, as before)."""
+        if self.user is None or not PERM.effective(self.user)["own_only"]:
+            return True
+        if doc.created_by != self.user.id:
+            return False
+        return self.role != "partner" or doc.status in ("PENDING", "REJECTED")
+
     def audit(self, action: str, entity: str, entity_id=None, before=None, after=None, note=""):
         self.s.add(AuditLog(user_id=self.user.id if self.user else None, action=action, entity=entity,
                             entity_id=entity_id, before=before, after=after, note=note or ""))
@@ -232,7 +252,7 @@ class Ledger:
                       project_id: int | None = None, customer_id: int | None = None, category: str = "rent",
                       money_account_id: int | None = None, paid_by_partner_id: int | None = None,
                       supplier: str = "", currency: str = "") -> Contract:
-        self._require_role("admin", "accountant")
+        self.allow("contracts", "add")
         name = (name or "").strip()
         if not name:
             raise BusinessError("err_name_required")
@@ -285,7 +305,7 @@ class Ledger:
     def save_quote(self, quote: Quote | None, *, date: dt.date, valid_until: dt.date | None, customer_id,
                    project_id, notes: str, lines: list, currency: str = "") -> Quote:
         """Create a quote, or replace an open one. ``lines``: [(description, quantity_milli, unit_price)]."""
-        self._require_role("admin", "accountant")
+        self.allow("sales", "edit" if quote is not None else "add")
         if quote is not None and quote.status != "OPEN":
             raise BusinessError("err_quote_not_open")
         if not isinstance(date, dt.date):
@@ -335,7 +355,7 @@ class Ledger:
 
     def accept_quote(self, q: Quote, date: dt.date, rate: int | None = None) -> list[Document]:
         """The customer accepted: record one invoice per line (same project and customer)."""
-        self._require_role("admin", "accountant")
+        self.allow("sales", "add")
         if q.status != "OPEN":
             raise BusinessError("err_quote_not_open")
         if q.project_id is None:
@@ -354,7 +374,7 @@ class Ledger:
         return docs
 
     def cancel_quote(self, q: Quote):
-        self._require_role("admin", "accountant")
+        self.allow("sales", "edit")
         if q.status != "OPEN":
             raise BusinessError("err_quote_not_open")
         before = self.quote_snapshot(q)
@@ -362,7 +382,7 @@ class Ledger:
         self.audit("cancel", "quote", q.id, before, self.quote_snapshot(q))
 
     def delete_quote(self, q: Quote):
-        self._require_role("admin", "accountant")
+        self.allow("sales", "delete")
         if q.status == "ACCEPTED":
             raise BusinessError("err_quote_accepted")
         self.audit("delete", "quote", q.id, self.quote_snapshot(q), None)
@@ -438,7 +458,7 @@ class Ledger:
             return 0
 
     def save_rate(self, d: dt.date, rate: int) -> CurrencyRate:
-        self._require_role("admin", "accountant")
+        self.allow("cash", "add")
         if not isinstance(d, dt.date):
             raise BusinessError("err_date_required")
         if not isinstance(rate, int) or rate <= 0:
@@ -455,7 +475,7 @@ class Ledger:
         return row
 
     def delete_rate(self, row: CurrencyRate):
-        self._require_role("admin", "accountant")
+        self.allow("cash", "delete")
         self.audit("delete", "currency_rate", row.id, {"date": row.date.isoformat(), "rate": row.rate}, None)
         self.s.delete(row)
         self.s.flush()
@@ -486,7 +506,7 @@ class Ledger:
         """Create the documents of every month that is due (date <= today) and not created yet.
         Each month is created on its own; if one cannot be created (e.g. month locked, before the
         opening) the reason is kept on the contract and that contract waits; nothing else is affected."""
-        if self.role not in ("admin", "accountant"):
+        if not self.can("contracts", "add"):
             return 0
         made = 0
         for c in self.s.scalars(select(Contract).where(Contract.active.is_(True)).order_by(Contract.id)):
@@ -526,12 +546,12 @@ class Ledger:
         return made
 
     def stop_contract(self, c: Contract):
-        self._require_role("admin", "accountant")
+        self.allow("contracts", "edit")
         c.active = False
         self.audit("stop", "contract", c.id, None, {"name": c.name, "months_created": len(c.runs)})
 
     def delete_contract(self, c: Contract):
-        self._require_role("admin", "accountant")
+        self.allow("contracts", "delete")
         if any(r.document_id for r in c.runs):
             raise BusinessError("err_contract_has_docs")
         self.audit("delete", "contract", c.id, {"name": c.name}, None)
@@ -600,7 +620,7 @@ class Ledger:
     def create_share_version(self, effective_date: dt.date, shares: dict[int, int], note: str = "",
                              mode: str = "percent") -> ShareVersion:
         """``shares`` maps partner id to weight: ppm when mode="percent", whole units when mode="ratio"."""
-        self._require_role("admin")
+        self.allow("partners", "add")
         if not isinstance(effective_date, dt.date):
             raise BusinessError("err_date_required")
         if mode not in ("percent", "ratio"):
@@ -650,7 +670,7 @@ class Ledger:
             raise BusinessError("err_share_date_before_opening", opening=od.isoformat())
 
     def delete_share_version(self, version: ShareVersion):
-        self._require_role("admin")
+        self.allow("partners", "delete")
         versions = self.share_versions()
         if len(versions) <= 1 and self.s.scalar(select(func.count(Document.id))) > 0:
             raise BusinessError("err_share_last_version")
@@ -690,7 +710,7 @@ class Ledger:
                                      note: str = "", mode: str = "percent") -> ProjectShareVersion:
         """Shares for one project from a date. mode "ratio" also takes the amounts each partner paid
         for the project (in agorot) as weights, so the split is exactly in proportion to them."""
-        self._require_role("admin")
+        self.allow("partners", "add")
         if not isinstance(effective_date, dt.date):
             raise BusinessError("err_date_required")
         if project is None:
@@ -719,7 +739,7 @@ class Ledger:
         return v
 
     def delete_project_share_version(self, v: ProjectShareVersion):
-        self._require_role("admin")
+        self.allow("partners", "delete")
         versions = self.project_share_versions(v.project_id)
         if versions and versions[-1].id != v.id:
             raise BusinessError("err_share_not_latest")
@@ -769,7 +789,7 @@ class Ledger:
             raise BusinessError("err_name_exists", name=name)
 
     def save_partner(self, partner: Partner | None, name: str, id_number: str = "", phone: str = "") -> Partner:
-        self._require_role("admin")
+        self.allow("partners", "edit" if partner is not None else "add")
         name = self._name_clean(name)
         self._unique_name(Partner, name, partner.id if partner else None)
         before = self._entity_snapshot(partner) if partner else None
@@ -796,7 +816,7 @@ class Ledger:
         return n
 
     def delete_partner(self, partner: Partner):
-        self._require_role("admin")
+        self.allow("partners", "delete")
         if self.partner_references(partner.id):
             raise BusinessError("err_partner_in_use")
         snap = self._entity_snapshot(partner)
@@ -810,7 +830,7 @@ class Ledger:
                "item": Item}
 
     def save_master(self, entity: str, obj, **fields):
-        self._require_role("admin", "accountant")
+        self.allow("master", "edit" if obj is not None else "add")
         model = self._MASTER[entity]
         name = self._name_clean(fields.pop("name", ""))
         self._unique_name(model, name, obj.id if obj else None)
@@ -859,7 +879,7 @@ class Ledger:
         return n
 
     def delete_master(self, kind: str, obj):
-        self._require_role("admin", "accountant")
+        self.allow("master", "delete")
         if self.master_references(kind, obj.id):
             raise BusinessError("err_in_use_deactivate")
         snap = self._entity_snapshot(obj)
@@ -868,7 +888,7 @@ class Ledger:
         self.audit("delete", kind, obj.id, snap, None)
 
     def set_master_active(self, kind: str, obj, active: bool):
-        self._require_role("admin", "accountant")
+        self.allow("master", "edit")
         if obj.active == active:
             return
         if not active and kind == "item":
@@ -900,7 +920,8 @@ class Ledger:
     # ---------------------------------------------------------------- users
 
     def save_user(self, user: User | None, *, username: str, full_name: str, role: str,
-                  partner_id: int | None, password: str | None, lang: str = "ar", digits: str = "latn") -> User:
+                  partner_id: int | None, password: str | None, lang: str = "ar", digits: str = "latn",
+                  permissions: dict | None = None) -> User:
         self._require_role("admin")
         username = (username or "").strip().lower()
         import re
@@ -941,6 +962,8 @@ class Ledger:
         user.partner_id = partner_id
         user.lang = lang
         user.digits = digits
+        if permissions is not None:
+            user.permissions = PERM.clean(permissions, role)
         if password:
             user.password_hash = hash_password(password)
         self.s.flush()
@@ -1014,19 +1037,14 @@ class Ledger:
         return (self.s.scalar(select(func.max(Document.number)).where(Document.doc_type == doc_type)) or 0) + 1
 
     def _can_create(self, doc_type: str):
-        if self.role in ("admin", "accountant"):
-            return
-        if self.role == "partner" and doc_type in PARTNER_CREATABLE:
-            return
-        raise BusinessError("err_forbidden")
+        if doc_type == "OPENING":
+            raise BusinessError("err_forbidden")
+        self.allow(PERM.section_of(doc_type), "add")
 
-    def _can_modify(self, doc: Document):
-        if self.role in ("admin", "accountant"):
-            return
-        if (self.role == "partner" and doc.doc_type in PARTNER_CREATABLE and self.user
-                and doc.created_by == self.user.id and doc.status in ("PENDING", "REJECTED")):
-            return
-        raise BusinessError("err_forbidden")
+    def _can_modify(self, doc: Document, action: str = "edit"):
+        self.allow(PERM.section_of(doc.doc_type), action)
+        if not self._own_ok(doc):
+            raise BusinessError("err_forbidden")
 
     @staticmethod
     def doc_snapshot(doc: Document) -> dict:
@@ -1748,7 +1766,7 @@ class Ledger:
 
     def set_recipe(self, project: Project, quantities: dict[int, int]):
         """``quantities``: item id -> thousandths of the item used by one produced unit (0 removes it)."""
-        self._require_role("admin", "accountant")
+        self.allow("production", "edit")
         before = {r.item_id: r.quantity for r in self.recipe_of(project.id)}
         for iid, q in quantities.items():
             if self.s.get(Item, iid) is None:
@@ -2001,7 +2019,9 @@ class Ledger:
             raise BusinessError("err_share_period_change")
 
     def void_document(self, doc: Document, reason: str):
-        self._require_role("admin", "accountant")
+        self.allow(PERM.section_of(doc.doc_type), "delete")
+        if not self._own_ok(doc):
+            raise BusinessError("err_forbidden")
         reason = (reason or "").strip()
         if len(reason) < 3:
             raise BusinessError("err_reason_required")
@@ -2045,7 +2065,7 @@ class Ledger:
 
     def delete_document(self, doc: Document, reason: str = ""):
         """Hard delete. Only for documents that never reached the books."""
-        self._can_modify(doc)
+        self._can_modify(doc, "delete")
         if doc.status not in ("PENDING", "REJECTED"):
             raise BusinessError("err_only_unposted_delete")
         self._check_date_open(doc.date)
@@ -2139,7 +2159,7 @@ class Ledger:
 
     def retry_post(self, doc: Document):
         """Post a PENDING document whose approvals are complete (e.g. after topping up cash)."""
-        self._require_role("admin", "accountant")
+        self.allow(PERM.section_of(doc.doc_type), "edit")
         if doc.status != "PENDING":
             raise BusinessError("err_not_pending")
         self._check_date_open(doc.date)
@@ -2162,7 +2182,7 @@ class Ledger:
         ``assets`` items: {"id": existing asset id or None, "name", "amount", "project_id"}.
         Total of money + customers + assets must equal total partner capital.
         """
-        self._require_role("admin", "accountant")
+        self.allow("opening", "edit")
         if not isinstance(date, dt.date):
             raise BusinessError("err_date_required")
         if date > self.today:
@@ -2274,7 +2294,7 @@ class Ledger:
     # ---------------------------------------------------------------- months
 
     def lock_month(self, month: str):
-        self._require_role("admin")
+        self.allow("months", "manage")
         self._valid_month(month)
         if month > month_of(self.today):
             raise BusinessError("err_month_future")

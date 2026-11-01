@@ -9,13 +9,13 @@
 {% for i in items %}<tr class="{{ 'inactive' if not i.active }}"><td>{% if entity == 'money_account' %}<a href="/reports/cash/{{ i.id }}">{{ i.name }}</a>{% elif entity == 'customer' %}<a href="/reports/customer/{{ i.id }}">{{ i.name }}</a>{% elif entity in ('supplier', 'item') %}<a href="/reports/ledger?code={{ ('210' if entity == 'supplier' else '113') ~ ('%02d' % i.id) }}">{{ i.name }}</a>{% else %}<a href="/documents?project={{ i.id }}">{{ i.name }}</a>{% endif %}</td>
 {% if entity == 'money_account' %}<td>{{ t('ak_' + i.kind) }}</td><td>{{ i.holder }}{% if i.currency == 'USD' %} <span class="pill-cur">USD</span>{% endif %}</td><td class="n">{% if i.currency == 'USD' %}<b class="num" dir="ltr">{{ usd(fxbal[i.id]) }}</b><br><small class="muted">≈ {{ m(bal[i.id]) }}</small>{% else %}{{ m(bal[i.id]) }}{% endif %}</td>{% elif entity == 'project' %}<td>{{ t('pk_' + i.kind) }}</td><td>{{ i.unit_name }}</td>{% elif entity == 'supplier' %}<td dir="ltr">{{ i.phone }}</td><td class="n">{{ sbal(bal[i.id]) }}</td>{% elif entity == 'item' %}<td>{{ i.unit }}</td><td>{{ t('cat_' + i.category) }}</td><td class="n"><span class="num" dir="ltr">{{ qty(bal[i.id][0]) }}</span></td><td class="n">{{ m(bal[i.id][1]) }}</td>{% else %}<td class="n">{{ m(bal[i.id]) }}{% if fxbal.get(i.id) %}<br><b class="num" dir="ltr">{{ usd(fxbal[i.id]) }}</b>{% endif %}</td>{% endif %}
 <td>{{ t('active') if i.active else t('inactive') }}</td>
-<td>{% if user.role in ('admin','accountant') %}<a class="btn small" href="?edit={{ i.id }}">{{ t('btn_edit') }}</a>
+<td>{% if can('master', 'edit') or can('master', 'delete') %}<a class="btn small" href="?edit={{ i.id }}">{{ t('btn_edit') }}</a>
 <form method="post" action="/master/{{ entity }}/{{ i.id }}/active" class="inline">{{ csrf_field() }}<input type="hidden" name="active" value="{{ '0' if i.active else '1' }}"><button class="small" data-testid="toggle-{{ i.id }}">{{ t('btn_deactivate') if i.active else t('btn_activate') }}</button></form>
 {% if refs[i.id] == 0 %}<form method="post" action="/master/{{ entity }}/{{ i.id }}/delete" class="inline confirm" data-confirm="{{ t('confirm_delete') }}">{{ csrf_field() }}<button class="danger small" data-testid="delete-{{ i.id }}">{{ t('btn_delete') }}</button></form>{% else %}<small class="muted">{{ t('in_use') }}</small>{% endif %}{% endif %}</td></tr>
 {% else %}<tr><td colspan="6" class="muted">{{ t('empty') }}</td></tr>{% endfor %}
 </tbody></table></div>
 <p class="muted">{{ t('help_master_delete') }}</p></section>
-{% if user.role in ('admin','accountant') %}
+{% if can('master', 'add') or (edit and can('master', 'edit')) %}
 <form method="post" action="/master/{{ entity }}/save" class="card form" data-testid="master-form">{{ csrf_field() }}
 <h2>{{ t('btn_edit') if edit else t('btn_add') }}</h2>
 {% if edit %}<input type="hidden" name="id" value="{{ edit.id }}">{% endif %}

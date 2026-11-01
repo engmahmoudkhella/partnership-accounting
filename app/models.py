@@ -46,6 +46,8 @@ class User(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     lang: Mapped[str] = mapped_column(String(2), default="ar")
     digits: Mapped[str] = mapped_column(String(4), default="latn")
+    # what this user may see and do (see permissions.py); empty = his role's defaults
+    permissions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
 
     partner = relationship("Partner")

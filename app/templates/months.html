@@ -10,7 +10,7 @@
 <td>{{ ('🔒 ' + t('locked')) if r.lock else t('open') }}</td>
 <td>
 {% if user in approvers and user.id not in r.signoffs %}<form method="post" action="/months/{{ r.month }}/signoff" class="inline">{{ csrf_field() }}<button class="small">{{ t('btn_signoff') }}</button></form>{% endif %}
-{% if user.role == 'admin' %}{% if r.lock %}<form method="post" action="/months/{{ r.month }}/unlock" class="inline-form">{{ csrf_field() }}<input name="reason" required minlength="3" placeholder="{{ t('f_reason') }}"><button class="danger small">{{ t('btn_unlock') }}</button></form>{% else %}<form method="post" action="/months/{{ r.month }}/lock" class="inline confirm" data-confirm="{{ t('confirm_lock') }}">{{ csrf_field() }}<button class="small" data-testid="lock-{{ r.month }}">{{ t('btn_lock') }}</button></form>{% endif %}{% endif %}
+{% if r.lock and user.role == 'admin' %}<form method="post" action="/months/{{ r.month }}/unlock" class="inline-form">{{ csrf_field() }}<input name="reason" required minlength="3" placeholder="{{ t('f_reason') }}"><button class="danger small">{{ t('btn_unlock') }}</button></form>{% elif not r.lock and can('months', 'manage') %}<form method="post" action="/months/{{ r.month }}/lock" class="inline confirm" data-confirm="{{ t('confirm_lock') }}">{{ csrf_field() }}<button class="small" data-testid="lock-{{ r.month }}">{{ t('btn_lock') }}</button></form>{% endif %}
 </td></tr>{% else %}<tr><td colspan="6" class="muted">{{ t('err_opening_required') }}</td></tr>{% endfor %}
 </tbody></table></div></section>
 {% endblock %}

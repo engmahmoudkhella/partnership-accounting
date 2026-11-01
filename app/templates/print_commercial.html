@@ -65,7 +65,7 @@
   <button class="primary" onclick="window.print()" data-testid="cm-print">🖨 {{ t('btn_print') }}</button>
   {% if kind == 'quote' %}
     <a href="/quotes">{{ t('nav_quotes') }}</a>
-    {% if quote.status == 'OPEN' and user.role in ('admin', 'accountant') %}
+    {% if quote.status == 'OPEN' and can('sales', 'add') %}
       <a href="/quotes/{{ quote.id }}/edit" data-testid="quote-edit">{{ t('btn_edit') }}</a>
       <form method="post" action="/quotes/{{ quote.id }}/accept" onsubmit="return confirm({{ t('confirm_accept_quote')|tojson }})"><input type="hidden" name="csrf" value="{{ csrf }}">
         <input type="date" name="date" value="{{ today.isoformat() }}" aria-label="{{ t('f_date') }}" data-testid="accept-date">
@@ -73,7 +73,7 @@
         <button class="primary" data-testid="quote-accept">{{ t('btn_accept_quote') }}</button></form>
       <form method="post" action="/quotes/{{ quote.id }}/cancel" onsubmit="return confirm({{ t('confirm_cancel_quote')|tojson }})"><input type="hidden" name="csrf" value="{{ csrf }}"><button>{{ t('btn_cancel_quote') }}</button></form>
     {% endif %}
-    {% if quote.status != 'ACCEPTED' and user.role in ('admin', 'accountant') %}
+    {% if quote.status != 'ACCEPTED' and can('sales', 'delete') %}
       <form method="post" action="/quotes/{{ quote.id }}/delete" onsubmit="return confirm({{ t('confirm_delete')|tojson }})"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger" data-testid="quote-delete">{{ t('btn_delete') }}</button></form>
     {% endif %}
     {% for d in invoices %}<a href="/documents/{{ d.id }}/invoice">{{ t('cm_invoice') }} #{{ num(d.number) }}</a>{% endfor %}

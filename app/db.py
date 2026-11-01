@@ -56,6 +56,7 @@ ADDED_COLUMNS = [
     ("opening_lines", "fx", "INTEGER NOT NULL DEFAULT 0"),
     ("contracts", "currency", "VARCHAR(3) NOT NULL DEFAULT ''"),
     ("quotes", "currency", "VARCHAR(3) NOT NULL DEFAULT ''"),
+    ("users", "permissions", "JSON"),
 ]
 
 

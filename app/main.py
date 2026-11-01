@@ -20,6 +20,7 @@ from sqlalchemy import func, or_, select
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import numbers as N
+from . import permissions as PERM
 from . import chart as COA
 from .db import init_db, make_engine, make_sessionmaker
 from .forms import ATTACHMENT_TYPES, FORM_FIELDS, FX_TYPES, field_label, parse_date, parse_document_form
@@ -213,7 +214,9 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
                         csrf=csrf_token(req), money=money, qty=qty, usd=usd, rate=rate, fx_types=FX_TYPES, pct=pct, num=num, fdate=date,
                         flashes=flashes, today=today_fn(), N=N, field_label=field_label,
                         company=ctx.L.get_setting("company_name", ""),
-                        pending_count=_pending_count(ctx), vk=COA.voucher_kind, code_of=COA.code_of)
+                        pending_count=_pending_count(ctx), vk=COA.voucher_kind, code_of=COA.code_of,
+                        can=lambda section, action="view": PERM.can(ctx.user, section, action),
+                        can_doc=lambda t, action="view": PERM.can(ctx.user, PERM.section_of(t), action))
         ctx_vars.update(kw)
         return templates.TemplateResponse(req, template, ctx_vars, status_code=status_code)
 
@@ -244,6 +247,15 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             raise Redirect("/login?" + urlencode({"next": str(ctx.request.url.path)}))
         if roles and ctx.user.role not in roles:
             raise BusinessError("err_forbidden")
+
+    def need(ctx: Ctx, section: str, action: str = "view"):
+        """Signed in, and allowed to do ``action`` in ``section`` (the user's chosen permissions)."""
+        require(ctx)
+        if not PERM.can(ctx.user, section, action):
+            raise BusinessError("err_forbidden")
+
+    def need_doc(ctx: Ctx, doc_type: str, action: str = "view"):
+        need(ctx, PERM.section_of(doc_type), action)
 
     def page(fn):
         """Wrap a handler: context, auth redirects, commit/rollback, business errors."""
@@ -461,7 +473,9 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         has_opening = L.opening_doc() is not None
         partners = L.partner_summary() if L.share_versions() else []
         projects = L.project_report(dt.date(today_fn().year, today_fn().month, 1), None) if has_opening else []
-        recent = list(ctx.s.scalars(select(Document).order_by(Document.id.desc()).limit(10)))
+        visible = [t for t in DOC_TYPES if PERM.can(ctx.user, PERM.section_of(t))]
+        recent = list(ctx.s.scalars(select(Document).where(Document.doc_type.in_(visible))
+                                    .order_by(Document.id.desc()).limit(10)))
         dist = L.distributable(today_fn()) if has_opening else 0
         return render(ctx, "dashboard.html", fx_bal=fx_bal, balances=balances, customers=customers, tb=tb,
                       has_opening=has_opening, partners=partners, projects=projects, recent=recent,
@@ -583,7 +597,8 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         require(ctx)
         run_due_contracts(ctx)
         q = ctx.request.query_params
-        stmt = select(Document)
+        visible = [t for t in DOC_TYPES if PERM.can(ctx.user, PERM.section_of(t))]
+        stmt = select(Document).where(Document.doc_type.in_(visible))
         if q.get("type") in DOC_TYPES:
             stmt = stmt.where(Document.doc_type == q["type"])
         if q.get("status") in ("PENDING", "POSTED", "REJECTED", "VOID"):
@@ -627,7 +642,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/documents/new/{doc_type}", response_class=HTMLResponse)
     @page
     async def doc_new(ctx: Ctx, doc_type: str):
-        require(ctx, "admin", "accountant", "partner")
+        require(ctx)
         if doc_type not in FORM_FIELDS:
             raise BusinessError("err_not_found")
         ctx.L._can_create(doc_type)
@@ -676,9 +691,10 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/documents/new/{doc_type}")
     @page
     async def doc_create(ctx: Ctx, doc_type: str, form):
-        require(ctx, "admin", "accountant", "partner")
+        require(ctx)
         if doc_type not in FORM_FIELDS:
             raise BusinessError("err_not_found")
+        need_doc(ctx, doc_type, "add")
         data, extras, errors = parse_document_form(doc_type, form)
         values = {k: (v if isinstance(v, str) else "") for k, v in form.items()}
         if errors:
@@ -710,12 +726,18 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     async def doc_view(ctx: Ctx, doc_id: int):
         require(ctx)
         doc = get_or_404(ctx, Document, doc_id)
+        need_doc(ctx, doc.doc_type)
         history = list(ctx.s.scalars(select(AuditLog).where(AuditLog.entity == "document",
                                                             AuditLog.entity_id == doc.id).order_by(AuditLog.id)))
         approvers = ctx.L.approvers() if doc.status in ("PENDING", "REJECTED") else []
         linked = list(ctx.s.scalars(select(Document).where(Document.capital_call_id == doc.id)))
         asset = ctx.s.get(Asset, doc.asset_id) if doc.asset_id else None
-        return render(ctx, "doc_view.html", doc=doc, history=history, names=_names(ctx), approvers=approvers,
+        sec = PERM.section_of(doc.doc_type)
+        own_ok = ctx.L._own_ok(doc)
+        may = {"edit": doc.status in ("POSTED", "PENDING", "REJECTED") and PERM.can(ctx.user, sec, "edit") and own_ok,
+               "delete": doc.status in ("PENDING", "REJECTED") and PERM.can(ctx.user, sec, "delete") and own_ok,
+               "void": doc.status == "POSTED" and PERM.can(ctx.user, sec, "delete") and own_ok}
+        return render(ctx, "doc_view.html", may=may, doc=doc, history=history, names=_names(ctx), approvers=approvers,
                       linked=linked, asset=asset, can_decide=(doc.status == "PENDING" and ctx.user in ctx.L.approvers()
                                                               and not any(a.user_id == ctx.user.id for a in doc.approvals)),
                       locked=ctx.L.is_locked(doc.date))
@@ -730,6 +752,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     async def doc_print(ctx: Ctx, doc_id: int):
         require(ctx)
         doc = get_or_404(ctx, Document, doc_id)
+        need_doc(ctx, doc.doc_type)
         asset = ctx.s.get(Asset, doc.asset_id) if doc.asset_id else None
         cash_amount = doc.amount - (doc.fee or 0) if doc.doc_type == "RECEIPT" else doc.amount
         return render(ctx, "print_voucher.html", doc=doc, names=_names(ctx), coa=coa_names(ctx), asset=asset,
@@ -741,7 +764,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/documents/{doc_id:int}/edit", response_class=HTMLResponse)
     @page
     async def doc_edit(ctx: Ctx, doc_id: int):
-        require(ctx, "admin", "accountant", "partner")
+        require(ctx)
         doc = get_or_404(ctx, Document, doc_id)
         if doc.doc_type == "OPENING":
             raise Redirect("/opening")
@@ -756,8 +779,9 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/documents/{doc_id:int}/edit")
     @page
     async def doc_update(ctx: Ctx, doc_id: int, form):
-        require(ctx, "admin", "accountant", "partner")
+        require(ctx)
         doc = get_or_404(ctx, Document, doc_id)
+        ctx.L._can_modify(doc)
         data, extras, errors = parse_document_form(doc.doc_type, form)
         values = {k: (v if isinstance(v, str) else "") for k, v in form.items()}
         common = dict(doc_type=doc.doc_type, doc=doc, values=values, fields=FORM_FIELDS[doc.doc_type],
@@ -787,7 +811,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/documents/{doc_id:int}/void")
     @page
     async def doc_void(ctx: Ctx, doc_id: int, form):
-        require(ctx, "admin", "accountant")
+        require(ctx)
         doc = get_or_404(ctx, Document, doc_id)
         ctx.L.void_document(doc, form.get("reason", ""))
         flash(ctx.request, "ok", ctx.t("msg_doc_voided"))
@@ -796,7 +820,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/documents/{doc_id:int}/delete")
     @page
     async def doc_delete(ctx: Ctx, doc_id: int, form):
-        require(ctx, "admin", "accountant", "partner")
+        require(ctx)
         doc = get_or_404(ctx, Document, doc_id)
         ctx.L.delete_document(doc, form.get("reason", ""))
         flash(ctx.request, "ok", ctx.t("msg_doc_deleted"))
@@ -817,7 +841,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/documents/{doc_id:int}/post")
     @page
     async def doc_post(ctx: Ctx, doc_id: int, form):
-        require(ctx, "admin", "accountant")
+        require(ctx)
         doc = get_or_404(ctx, Document, doc_id)
         ctx.L.retry_post(doc)
         flash(ctx.request, "ok", ctx.t("status_POSTED"))
@@ -828,6 +852,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     async def doc_attachment(ctx: Ctx, doc_id: int):
         require(ctx)
         doc = get_or_404(ctx, Document, doc_id)
+        need_doc(ctx, doc.doc_type)
         if not doc.attachment:
             raise BusinessError("err_not_found")
         path = os.path.join(upload_dir, os.path.basename(doc.attachment))
@@ -844,7 +869,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/opening", response_class=HTMLResponse)
     @page
     async def opening_page(ctx: Ctx):
-        require(ctx)
+        need(ctx, "opening")
         doc = ctx.L.opening_doc()
         values = {"date": (doc.date if doc else today_fn()).isoformat(),
                   "opening_rate": N.rate_input_value(doc.rate if doc and doc.rate else ctx.L.usd_rate())}
@@ -872,7 +897,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/opening")
     @page
     async def opening_post(ctx: Ctx, form):
-        require(ctx, "admin", "accountant")
+        need(ctx, "opening", "edit")
         lists = _opening_lists(ctx)
         errors = {}
         values = {k: (v if isinstance(v, str) else "") for k, v in form.items()}
@@ -940,7 +965,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/partners", response_class=HTMLResponse)
     @page
     async def partners_page(ctx: Ctx):
-        require(ctx)
+        need(ctx, "partners")
         partners = list(ctx.s.scalars(select(Partner).order_by(Partner.id)))
         versions = list(reversed(ctx.L.share_versions()))
         version_pct = {}
@@ -962,7 +987,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/project-shares/new")
     @page
     async def project_shares_new(ctx: Ctx, form):
-        require(ctx, "admin")
+        need(ctx, "partners", "add")
         project = get_or_404(ctx, Project, N.parse_id(form.get("project_id")) or 0)
         date = parse_date(form.get("effective_date", ""))
         by_amounts = form.get("mode") == "amounts"
@@ -986,7 +1011,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/project-shares/{vid:int}/delete")
     @page
     async def project_shares_delete(ctx: Ctx, vid: int, form):
-        require(ctx, "admin")
+        need(ctx, "partners", "delete")
         ctx.L.delete_project_share_version(get_or_404(ctx, ProjectShareVersion, vid))
         flash(ctx.request, "ok", ctx.t("msg_deleted"))
         raise_commit_redirect(ctx, "/partners")
@@ -994,7 +1019,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/partners/save")
     @page
     async def partner_save(ctx: Ctx, form):
-        require(ctx, "admin")
+        need(ctx, "partners", "add")
         pid = form.get("id") or ""
         p = get_or_404(ctx, Partner, N.parse_id(pid)) if N.parse_id(pid) else None
         ctx.L.save_partner(p, form.get("name", ""), form.get("id_number", ""), form.get("phone", ""))
@@ -1004,7 +1029,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/partners/{pid:int}/delete")
     @page
     async def partner_delete(ctx: Ctx, pid: int, form):
-        require(ctx, "admin")
+        need(ctx, "partners", "delete")
         ctx.L.delete_partner(get_or_404(ctx, Partner, pid))
         flash(ctx.request, "ok", ctx.t("msg_deleted"))
         raise_commit_redirect(ctx, "/partners")
@@ -1012,7 +1037,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/shares/new")
     @page
     async def shares_new(ctx: Ctx, form):
-        require(ctx, "admin")
+        need(ctx, "partners", "add")
         date = parse_date(form.get("effective_date", ""))
         mode = form.get("mode", "percent")
         shares = {}
@@ -1034,7 +1059,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/shares/{vid:int}/delete")
     @page
     async def shares_delete(ctx: Ctx, vid: int, form):
-        require(ctx, "admin")
+        need(ctx, "partners", "delete")
         ctx.L.delete_share_version(get_or_404(ctx, ShareVersion, vid))
         flash(ctx.request, "ok", ctx.t("msg_deleted"))
         raise_commit_redirect(ctx, "/partners")
@@ -1059,7 +1084,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/quotes", response_class=HTMLResponse)
     @page
     async def quotes_page(ctx: Ctx):
-        require(ctx)
+        need(ctx, "sales")
         q = ctx.request.query_params
         stmt = select(Quote).order_by(Quote.number.desc())
         if q.get("status") in ("OPEN", "ACCEPTED", "CANCELLED"):
@@ -1088,13 +1113,13 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/quotes/new", response_class=HTMLResponse)
     @page
     async def quote_new(ctx: Ctx):
-        require(ctx, "admin", "accountant")
+        need(ctx, "sales", "add")
         return _quote_form(ctx, None)
 
     @app.get("/quotes/{qid:int}/edit", response_class=HTMLResponse)
     @page
     async def quote_edit(ctx: Ctx, qid: int):
-        require(ctx, "admin", "accountant")
+        need(ctx, "sales", "edit")
         quote = get_or_404(ctx, Quote, qid)
         if quote.status != "OPEN":
             raise BusinessError("err_quote_not_open")
@@ -1103,7 +1128,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/quotes/save")
     @page
     async def quote_save(ctx: Ctx, form):
-        require(ctx, "admin", "accountant")
+        need(ctx, "sales", "add")
         quote = None
         qid = safe_id(form.get("id"))
         if qid:
@@ -1135,7 +1160,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/quotes/{qid:int}", response_class=HTMLResponse)
     @page
     async def quote_view(ctx: Ctx, qid: int):
-        require(ctx)
+        need(ctx, "sales")
         quote = get_or_404(ctx, Quote, qid)
         rows = [{"description": ln.description, "quantity": ln.quantity, "unit_price": ln.unit_price,
                  "amount": ln.amount} for ln in quote.lines]
@@ -1148,7 +1173,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/quotes/{qid:int}/accept")
     @page
     async def quote_accept(ctx: Ctx, qid: int, form):
-        require(ctx, "admin", "accountant")
+        need(ctx, "sales", "add")
         quote = get_or_404(ctx, Quote, qid)
         d = opt_date(form.get("date")) or today_fn()
         raw = (form.get("rate") or "").strip()
@@ -1159,7 +1184,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/quotes/{qid:int}/cancel")
     @page
     async def quote_cancel(ctx: Ctx, qid: int, form):
-        require(ctx, "admin", "accountant")
+        need(ctx, "sales", "edit")
         ctx.L.cancel_quote(get_or_404(ctx, Quote, qid))
         flash(ctx.request, "ok", ctx.t("msg_saved"))
         raise_commit_redirect(ctx, f"/quotes/{qid}")
@@ -1167,7 +1192,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/quotes/{qid:int}/delete")
     @page
     async def quote_delete(ctx: Ctx, qid: int, form):
-        require(ctx, "admin", "accountant")
+        need(ctx, "sales", "delete")
         ctx.L.delete_quote(get_or_404(ctx, Quote, qid))
         flash(ctx.request, "ok", ctx.t("msg_deleted"))
         raise_commit_redirect(ctx, "/quotes")
@@ -1175,7 +1200,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/documents/{doc_id:int}/invoice", response_class=HTMLResponse)
     @page
     async def doc_invoice(ctx: Ctx, doc_id: int):
-        require(ctx)
+        need(ctx, "sales")
         doc = get_or_404(ctx, Document, doc_id)
         if doc.doc_type != "INVOICE":
             raise BusinessError("err_not_found")
@@ -1193,7 +1218,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/reports/customer/{cid:int}/claim", response_class=HTMLResponse)
     @page
     async def customer_claim(ctx: Ctx, cid: int):
-        require(ctx)
+        need(ctx, "sales")
         c = get_or_404(ctx, Customer, cid)
         as_of = opt_date(ctx.request.query_params.get("date")) or today_fn()
         currencies = ctx.L.customer_currencies(cid)
@@ -1211,7 +1236,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/rates", response_class=HTMLResponse)
     @page
     async def rates_page(ctx: Ctx):
-        require(ctx)
+        need(ctx, "cash")
         q = ctx.request.query_params
         rows = list(ctx.s.scalars(select(CurrencyRate).order_by(CurrencyRate.date.desc())))
         d = opt_date(q.get("date")) or today_fn()
@@ -1226,7 +1251,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/rates/save")
     @page
     async def rates_save(ctx: Ctx, form):
-        require(ctx, "admin", "accountant")
+        need(ctx, "cash", "add")
         ctx.L.save_rate(parse_date(form.get("date", "")), N.parse_rate(form.get("rate", "")))
         flash(ctx.request, "ok", ctx.t("msg_saved"))
         raise_commit_redirect(ctx, "/rates")
@@ -1234,7 +1259,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/rates/{rid:int}/delete")
     @page
     async def rates_delete(ctx: Ctx, rid: int, form):
-        require(ctx, "admin", "accountant")
+        need(ctx, "cash", "delete")
         ctx.L.delete_rate(get_or_404(ctx, CurrencyRate, rid))
         flash(ctx.request, "ok", ctx.t("msg_deleted"))
         raise_commit_redirect(ctx, "/rates")
@@ -1255,7 +1280,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/contracts", response_class=HTMLResponse)
     @page
     async def contracts_page(ctx: Ctx):
-        require(ctx)
+        need(ctx, "contracts")
         run_due_contracts(ctx)
         items = list(ctx.s.scalars(select(Contract).order_by(Contract.active.desc(), Contract.id)))
         names = {
@@ -1282,7 +1307,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/contracts/save")
     @page
     async def contracts_save(ctx: Ctx, form):
-        require(ctx, "admin", "accountant")
+        need(ctx, "contracts", "add")
         kind = form.get("kind", "")
         pay = form.get("pay_source", "account")
         c = ctx.L.save_contract(
@@ -1300,7 +1325,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/contracts/{cid:int}/stop")
     @page
     async def contracts_stop(ctx: Ctx, cid: int, form):
-        require(ctx, "admin", "accountant")
+        need(ctx, "contracts", "edit")
         ctx.L.stop_contract(get_or_404(ctx, Contract, cid))
         flash(ctx.request, "ok", ctx.t("msg_saved"))
         raise_commit_redirect(ctx, "/contracts")
@@ -1308,7 +1333,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/contracts/{cid:int}/delete")
     @page
     async def contracts_delete(ctx: Ctx, cid: int, form):
-        require(ctx, "admin", "accountant")
+        need(ctx, "contracts", "delete")
         ctx.L.delete_contract(get_or_404(ctx, Contract, cid))
         flash(ctx.request, "ok", ctx.t("msg_deleted"))
         raise_commit_redirect(ctx, "/contracts")
@@ -1319,6 +1344,8 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @page
     async def inventory_page(ctx: Ctx):
         require(ctx)
+        if not (PERM.can(ctx.user, "purchases_stock") or PERM.can(ctx.user, "production")):
+            raise BusinessError("err_forbidden")
         q = ctx.request.query_params
         as_of = opt_date(q.get("as_of"))
         d1, d2 = opt_date(q.get("from")), opt_date(q.get("to"))
@@ -1354,7 +1381,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/inventory/recipe/{pid:int}")
     @page
     async def recipe_save(ctx: Ctx, pid: int, form):
-        require(ctx, "admin", "accountant")
+        need(ctx, "production", "edit")
         project = get_or_404(ctx, Project, pid)
         quantities = {}
         for item in ctx.s.scalars(select(Item)):
@@ -1370,7 +1397,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/master/{entity}", response_class=HTMLResponse)
     @page
     async def master_list(ctx: Ctx, entity: str):
-        require(ctx)
+        need(ctx, "master")
         if entity not in MASTER:
             raise BusinessError("err_not_found")
         model = MASTER[entity]
@@ -1396,7 +1423,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/master/{entity}/save")
     @page
     async def master_save(ctx: Ctx, entity: str, form):
-        require(ctx, "admin", "accountant")
+        need(ctx, "master", "add")
         if entity not in MASTER:
             raise BusinessError("err_not_found")
         oid = form.get("id") or ""
@@ -1421,7 +1448,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/master/{entity}/{oid:int}/delete")
     @page
     async def master_delete(ctx: Ctx, entity: str, oid: int, form):
-        require(ctx, "admin", "accountant")
+        need(ctx, "master", "delete")
         if entity not in MASTER:
             raise BusinessError("err_not_found")
         ctx.L.delete_master(entity, get_or_404(ctx, MASTER[entity], oid))
@@ -1431,7 +1458,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.post("/master/{entity}/{oid:int}/active")
     @page
     async def master_active(ctx: Ctx, entity: str, oid: int, form):
-        require(ctx, "admin", "accountant")
+        need(ctx, "master", "edit")
         if entity not in MASTER:
             raise BusinessError("err_not_found")
         ctx.L.set_master_active(entity, get_or_404(ctx, MASTER[entity], oid), form.get("active") == "1")
@@ -1448,8 +1475,20 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         edit = None
         if safe_id(ctx.request.query_params.get("edit")):
             edit = ctx.s.get(User, safe_id(ctx.request.query_params["edit"]))
-        return render(ctx, "users.html", users=users, edit=edit, roles=ROLES,
+        presets = {r: PERM.to_json(PERM.preset(r)) for r in ROLES}
+        cur = PERM.to_json(PERM.effective(edit)) if edit else presets["accountant"]
+        return render(ctx, "users.html", users=users, edit=edit, roles=ROLES, sections=PERM.SECTIONS,
+                      presets=presets, cur_perms=cur, perm_of=lambda u: PERM.effective(u),
                       partners=list(ctx.s.scalars(select(Partner).order_by(Partner.id))))
+
+    def _perms_from_form(form) -> dict:
+        """Checkboxes named perm_<section>_<action>, plus own_only."""
+        out = {}
+        for sec, acts in PERM.SECTIONS:
+            chosen = [a for a in acts if form.get(f"perm_{sec}_{a}") == "1"]
+            if chosen:
+                out[sec] = chosen
+        return {"s": out, "own_only": form.get("own_only") == "1"}
 
     @app.post("/users/save")
     @page
@@ -1463,7 +1502,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         ctx.L.save_user(u, username=form.get("username", ""), full_name=form.get("full_name", ""),
                         role=form.get("role", ""), partner_id=N.parse_id(pid),
                         password=form.get("password") or None, lang=form.get("lang", "ar"),
-                        digits=form.get("digits", "latn"))
+                        digits=form.get("digits", "latn"), permissions=_perms_from_form(form))
         flash(ctx.request, "ok", ctx.t("msg_saved"))
         raise_commit_redirect(ctx, "/users")
 
@@ -1529,7 +1568,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/months", response_class=HTMLResponse)
     @page
     async def months_page(ctx: Ctx):
-        require(ctx)
+        need(ctx, "months")
         L = ctx.L
         od = L.opening_date()
         months = []
@@ -1576,7 +1615,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/reports/trial", response_class=HTMLResponse)
     @page
     async def report_trial(ctx: Ctx):
-        require(ctx)
+        need(ctx, "reports")
         q = ctx.request.query_params
         as_of = opt_date(q.get("as_of"))
         mode = q.get("mode") if q.get("mode") in ("balances", "totals", "both") else "balances"
@@ -1593,14 +1632,14 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/reports/accounts", response_class=HTMLResponse)
     @page
     async def report_accounts(ctx: Ctx):
-        require(ctx)
+        need(ctx, "reports")
         as_of = opt_date(ctx.request.query_params.get("as_of"))
         return render(ctx, "report_accounts.html", nodes=COA.build_chart(ctx.s, ctx.t, end=as_of), as_of=as_of)
 
     @app.get("/reports/ledger", response_class=HTMLResponse)
     @page
     async def report_ledger(ctx: Ctx):
-        require(ctx)
+        need(ctx, "reports")
         q = ctx.request.query_params
         d1, d2 = opt_date(q.get("from")), opt_date(q.get("to"))
         project = safe_id(q.get("project"))
@@ -1616,7 +1655,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/reports/journal", response_class=HTMLResponse)
     @page
     async def report_journal(ctx: Ctx):
-        require(ctx)
+        need(ctx, "reports")
         q = ctx.request.query_params
         d1, d2 = opt_date(q.get("from")), opt_date(q.get("to"))
         if d1 is None and d2 is None:  # default: this month
@@ -1635,7 +1674,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/reports/projects", response_class=HTMLResponse)
     @page
     async def report_projects(ctx: Ctx):
-        require(ctx)
+        need(ctx, "reports")
         q = ctx.request.query_params
         d1, d2 = opt_date(q.get("from")), opt_date(q.get("to"))
         return render(ctx, "report_projects.html", rows=ctx.L.project_report(d1, d2), d1=d1, d2=d2,
@@ -1644,7 +1683,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/reports/partners", response_class=HTMLResponse)
     @page
     async def report_partners(ctx: Ctx):
-        require(ctx)
+        need(ctx, "reports")
         as_of = opt_date(ctx.request.query_params.get("as_of"))
         rows = ctx.L.partner_summary(as_of) if ctx.L.share_versions() else []
         return render(ctx, "report_partners.html", rows=rows, as_of=as_of,
@@ -1653,7 +1692,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/reports/partner/{pid:int}", response_class=HTMLResponse)
     @page
     async def report_partner(ctx: Ctx, pid: int):
-        require(ctx)
+        need(ctx, "reports")
         p = get_or_404(ctx, Partner, pid)
         lines = ctx.s.execute(select(JournalLine, Document).join(Document, Document.id == JournalLine.document_id)
                               .where(JournalLine.partner_id == pid)
@@ -1665,7 +1704,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/reports/cash/{ma_id:int}", response_class=HTMLResponse)
     @page
     async def report_cash(ctx: Ctx, ma_id: int):
-        require(ctx)
+        need(ctx, "reports")
         ma = get_or_404(ctx, MoneyAccount, ma_id)
         q = ctx.request.query_params
         d1, d2 = opt_date(q.get("from")), opt_date(q.get("to"))
@@ -1677,7 +1716,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/reports/customer/{cid:int}", response_class=HTMLResponse)
     @page
     async def report_customer(ctx: Ctx, cid: int):
-        require(ctx)
+        need(ctx, "reports")
         c = get_or_404(ctx, Customer, cid)
         lines = ctx.s.execute(select(JournalLine, Document).join(Document, Document.id == JournalLine.document_id)
                               .where(JournalLine.account == "1200", JournalLine.customer_id == cid)
@@ -1688,7 +1727,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/assets", response_class=HTMLResponse)
     @page
     async def assets_page(ctx: Ctx):
-        require(ctx)
+        need(ctx, "assets")
         rows = []
         for a in ctx.s.scalars(select(Asset).order_by(Asset.id)):
             src = ctx.s.get(Document, a.source_document_id) if a.source_document_id else None
@@ -1702,7 +1741,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/audit", response_class=HTMLResponse)
     @page
     async def audit_page(ctx: Ctx):
-        require(ctx)
+        need(ctx, "audit")
         q = ctx.request.query_params
         stmt = select(AuditLog)
         if q.get("action"):
@@ -1715,7 +1754,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @app.get("/export/documents.csv")
     @page
     async def export_csv(ctx: Ctx):
-        require(ctx)
+        need(ctx, "reports")
         names = _names(ctx)
         buf = io.StringIO()
         buf.write("﻿")
