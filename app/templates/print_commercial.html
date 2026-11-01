@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="{{ lang }}" dir="{{ dir }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{% set co = info.company_legal_name or info.company_name or t('app_name') %}
+{% if kind == 'quote' %}{% set title = t('cm_quote') %}{% set no = quote.number %}{% set ddate = quote.date %}
+{% elif kind == 'invoice' %}{% set title = t('cm_invoice') %}{% set no = doc.number %}{% set ddate = doc.date %}
+{% else %}{% set title = t('cm_claim') %}{% set no = none %}{% set ddate = as_of %}{% endif %}
+<title>{{ title }}{% if no %} {{ no }}{% endif %} · {{ co }}</title>
+<style>
+  @page{size:A4;margin:12mm}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI","Noto Sans Arabic",Tahoma,Arial,sans-serif;color:#111;background:#e9edf2;font-size:13px;line-height:1.5}
+  .bar{display:flex;flex-wrap:wrap;gap:.5rem;justify-content:center;align-items:center;padding:.8rem}
+  .bar button,.bar a{font:inherit;padding:.45rem 1.1rem;border-radius:8px;border:1px solid #9aa5b1;background:#fff;color:#111;text-decoration:none;cursor:pointer}
+  .bar .primary{background:#0f6b8f;color:#fff;border-color:#0f6b8f}
+  .bar .danger{color:#b42318;border-color:#b42318}
+  .bar form{display:inline-flex;gap:.4rem;align-items:center;margin:0}
+  .bar input{font:inherit;padding:.35rem .5rem;border:1px solid #9aa5b1;border-radius:8px}
+  .flash{max-width:210mm;margin:0 auto .6rem;padding:.6rem 1rem;border-radius:8px;background:#e6f4ea;color:#14532d}
+  .flash.error{background:#fdecea;color:#7a1c14}
+  .sheet{position:relative;width:210mm;max-width:100%;min-height:297mm;margin:0 auto 1rem;background:#fff;padding:14mm 14mm 12mm;box-shadow:0 2px 12px rgba(0,0,0,.12);display:flex;flex-direction:column;overflow:hidden}
+  .head{display:flex;justify-content:space-between;gap:8mm;align-items:flex-start;padding-bottom:5mm;border-bottom:3px solid #0f6b8f}
+  .brand{display:flex;gap:4mm;align-items:center}
+  .brand img{max-height:24mm;max-width:40mm;object-fit:contain}
+  .co{font-size:20px;font-weight:800;color:#0f3c4f}
+  .co-sub{color:#444;font-size:11.5px;white-space:pre-line}
+  .doc-title{text-align:end}
+  .doc-title h1{margin:0;font-size:28px;color:#0f6b8f;letter-spacing:.02em}
+  .doc-title .meta{margin-top:2mm;font-size:12.5px}
+  .doc-title .meta b{font-variant-numeric:tabular-nums}
+  .parties{display:flex;gap:6mm;margin:6mm 0 4mm}
+  .box{flex:1;border:1px solid #cfd8e0;border-radius:6px;padding:3mm 4mm;background:#f8fafc}
+  .box .lbl{font-size:11px;color:#56636f;font-weight:700;margin-bottom:1mm}
+  .box .val{font-size:15px;font-weight:700}
+  table{width:100%;border-collapse:collapse;margin-top:2mm;font-size:12.5px}
+  th,td{border:1px solid #b9c4ce;padding:2mm 2.5mm;text-align:start;vertical-align:top}
+  thead th{background:#0f6b8f;color:#fff;border-color:#0f6b8f}
+  td.n,th.n{text-align:end;white-space:nowrap}
+  td.c,th.c{text-align:center;width:9mm}
+  .num{font-variant-numeric:tabular-nums;unicode-bidi:isolate;direction:ltr;display:inline-block}
+  tfoot td{font-weight:700;background:#f2f6f9}
+  tfoot tr.grand td{background:#0f3c4f;color:#fff;font-size:15px}
+  .words{margin-top:3mm;padding:2.5mm 4mm;border:1px dashed #9aa5b1;border-radius:6px}
+  .words b{margin-inline-end:2mm}
+  .section{margin-top:5mm}
+  .section h3{margin:0 0 1.5mm;font-size:13px;color:#0f3c4f}
+  .pre{white-space:pre-line}
+  .letter p{margin:1.5mm 0}
+  .sigs{display:flex;justify-content:space-between;gap:10mm;margin-top:auto;padding-top:16mm}
+  .sigs div{flex:1;text-align:center;border-top:1px solid #111;padding-top:1.5mm;font-weight:700}
+  .foot{margin-top:6mm;color:#666;font-size:10px;display:flex;justify-content:space-between;border-top:1px solid #e1e6eb;padding-top:2mm}
+  .wm{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
+  .wm span{transform:rotate(-24deg);font-size:84px;font-weight:900;color:rgba(180,35,24,.14);border:8px solid rgba(180,35,24,.14);padding:2mm 12mm;border-radius:14px}
+  .tag{display:inline-block;padding:.5mm 2.5mm;border-radius:20px;font-size:11px;font-weight:700;background:#eef2f6}
+  .tag.ok{background:#e6f4ea;color:#14532d}.tag.bad{background:#fdecea;color:#7a1c14}
+  @media print{body{background:#fff}.bar,.flash{display:none}.sheet{box-shadow:none;margin:0;width:auto;min-height:calc(297mm - 24mm);padding:0}}
+</style>
+</head>
+<body>
+<div class="bar">
+  <button class="primary" onclick="window.print()" data-testid="cm-print">🖨 {{ t('btn_print') }}</button>
+  {% if kind == 'quote' %}
+    <a href="/quotes">{{ t('nav_quotes') }}</a>
+    {% if quote.status == 'OPEN' and user.role in ('admin', 'accountant') %}
+      <a href="/quotes/{{ quote.id }}/edit" data-testid="quote-edit">{{ t('btn_edit') }}</a>
+      <form method="post" action="/quotes/{{ quote.id }}/accept" onsubmit="return confirm({{ t('confirm_accept_quote')|tojson }})"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="date" name="date" value="{{ today.isoformat() }}" aria-label="{{ t('f_date') }}" data-testid="accept-date">
+        <button class="primary" data-testid="quote-accept">{{ t('btn_accept_quote') }}</button></form>
+      <form method="post" action="/quotes/{{ quote.id }}/cancel" onsubmit="return confirm({{ t('confirm_cancel_quote')|tojson }})"><input type="hidden" name="csrf" value="{{ csrf }}"><button>{{ t('btn_cancel_quote') }}</button></form>
+    {% endif %}
+    {% if quote.status != 'ACCEPTED' and user.role in ('admin', 'accountant') %}
+      <form method="post" action="/quotes/{{ quote.id }}/delete" onsubmit="return confirm({{ t('confirm_delete')|tojson }})"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger" data-testid="quote-delete">{{ t('btn_delete') }}</button></form>
+    {% endif %}
+    {% for d in invoices %}<a href="/documents/{{ d.id }}/invoice">{{ t('cm_invoice') }} #{{ num(d.number) }}</a>{% endfor %}
+  {% elif kind == 'invoice' %}
+    <a href="/documents/{{ doc.id }}">{{ t('btn_back_doc') }}</a>
+    <a href="/reports/customer/{{ doc.customer_id }}/claim">{{ t('cm_claim') }}</a>
+  {% else %}
+    <form method="get"><label>{{ t('claim_as_of') }} <input type="date" name="date" value="{{ as_of.isoformat() }}"></label>
+      <label><input type="checkbox" name="all" value="1" {{ 'checked' if show_all }}> {{ t('claim_show_paid') }}</label>
+      <button>{{ t('btn_show') }}</button></form>
+    <a href="/reports/customer/{{ customer.id }}">{{ t('rep_customer') }}</a>
+  {% endif %}
+</div>
+{% for kind_, msg in flashes %}<div class="flash {{ kind_ }}" role="alert">{{ msg }}</div>{% endfor %}
+
+<div class="sheet" data-testid="commercial-{{ kind }}">
+  {% if kind == 'invoice' and doc.status == 'VOID' %}<div class="wm"><span>{{ t('wm_void') }}</span></div>
+  {% elif kind == 'invoice' and doc.status != 'POSTED' %}<div class="wm"><span>{{ t('wm_pending') }}</span></div>
+  {% elif kind == 'quote' and quote.status == 'CANCELLED' %}<div class="wm"><span>{{ t('qs_CANCELLED') }}</span></div>{% endif %}
+
+  <div class="head">
+    <div class="brand">
+      {% if info.company_logo %}<img src="/settings/logo" alt="">{% endif %}
+      <div>
+        <div class="co" data-testid="cm-company">{{ co }}</div>
+        <div class="co-sub">{% if info.company_address %}{{ info.company_address }}
+{% endif %}{% if info.company_phone %}{{ t('s_phone') }}: <span class="num">{{ info.company_phone }}</span>{% endif %}{% if info.company_email %}  ·  <span class="num">{{ info.company_email }}</span>{% endif %}
+{% if info.company_reg_no %}{{ t('s_reg_no') }}: <span class="num">{{ info.company_reg_no }}</span>{% endif %}{% if info.company_tax_no %}  ·  {{ t('s_tax_no') }}: <span class="num">{{ info.company_tax_no }}</span>{% endif %}</div>
+      </div>
+    </div>
+    <div class="doc-title">
+      <h1 data-testid="cm-title">{{ title }}</h1>
+      <div class="meta">
+        {% if no %}{{ t('cm_number') }}: <b class="num" data-testid="cm-number">{{ ('QT-' if kind == 'quote' else 'INV-') }}{{ no }}</b><br>{% endif %}
+        {{ t('f_date') }}: <b class="num">{{ fdate(ddate) }}</b>
+        {% if kind == 'quote' and quote.valid_until %}<br>{{ t('f_valid_until') }}: <b class="num">{{ fdate(quote.valid_until) }}</b>{% endif %}
+        {% if kind == 'invoice' and doc.ref_no %}<br>{{ t('cm_ref') }}: <b class="num">{{ doc.ref_no }}</b>{% endif %}
+        {% if kind == 'quote' %}<br><span class="tag {{ 'ok' if quote.status == 'ACCEPTED' else 'bad' if quote.status == 'CANCELLED' else '' }}">{{ t('qs_' + quote.status) }}</span>{% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% set cust_id = quote.customer_id if kind == 'quote' else doc.customer_id if kind == 'invoice' else customer.id %}
+  {% set proj_id = quote.project_id if kind == 'quote' else doc.project_id if kind == 'invoice' else none %}
+  <div class="parties">
+    <div class="box"><div class="lbl">{{ t('cm_to') }}</div><div class="val" data-testid="cm-customer">{{ names.customer.get(cust_id, '') }}</div></div>
+    {% if proj_id %}<div class="box"><div class="lbl">{{ t('cm_subject') }}</div><div class="val">{{ names.project.get(proj_id, '') }}</div></div>{% endif %}
+  </div>
+
+  {% if kind in ('quote', 'invoice') %}
+  {% if kind == 'quote' %}<div class="letter"><p>{{ t('quote_intro') }}</p></div>{% endif %}
+  <table data-testid="cm-lines"><thead><tr><th class="c">#</th><th>{{ t('cm_item') }}</th><th class="n">{{ t('f_quantity') }}</th><th class="n">{{ t('f_unit_price') }}</th><th class="n">{{ t('f_line_total') }}</th></tr></thead>
+  <tbody>{% for r in rows %}<tr><td class="c">{{ num(loop.index) }}</td><td>{{ r.description }}</td><td class="n"><span class="num">{{ qty(r.quantity) }}</span></td><td class="n"><span class="num">{{ money(r.unit_price) }}</span></td><td class="n"><span class="num">{{ money(r.amount) }}</span></td></tr>{% endfor %}</tbody>
+  <tfoot>
+    <tr class="grand"><td colspan="4">{{ t('cm_total') }}</td><td class="n"><span class="num" data-testid="cm-total">{{ money(total) }} ₪</span></td></tr>
+    {% if kind == 'invoice' and doc.status == 'POSTED' and paid %}
+    <tr><td colspan="4">{{ t('cm_paid') }}</td><td class="n"><span class="num">{{ money(paid) }}</span></td></tr>
+    <tr><td colspan="4">{{ t('cm_remaining') }}</td><td class="n"><span class="num" data-testid="cm-remaining">{{ money(total - paid) }}</span></td></tr>
+    {% endif %}
+  </tfoot></table>
+  <div class="words"><b>{{ t('cm_in_words') }}:</b><span data-testid="cm-words">{{ words }}</span></div>
+  {% if kind == 'quote' and quote.notes %}<div class="section"><h3>{{ t('f_notes') }}</h3><div class="pre">{{ quote.notes }}</div></div>{% endif %}
+  {% if kind == 'quote' and quote.valid_until %}<div class="section muted">{{ t('quote_validity', date='\u2066' ~ fdate(quote.valid_until) ~ '\u2069') }}</div>{% endif %}
+
+  {% else %}
+  <div class="letter">
+    <p>{{ t('claim_greeting') }}</p>
+    <p>{{ t('claim_intro', date='\u2066' ~ fdate(as_of) ~ '\u2069') }}</p>
+  </div>
+  {% set list = claim.dues if show_all else claim.open %}
+  <table data-testid="cm-claim"><thead><tr><th class="c">#</th><th>{{ t('f_date') }}</th><th>{{ t('cm_doc') }}</th><th>{{ t('cm_item') }}</th><th class="n">{{ t('cm_amount') }}</th><th class="n">{{ t('cm_paid') }}</th><th class="n">{{ t('cm_remaining') }}</th></tr></thead>
+  <tbody>{% for r in list %}{% set d = r.doc %}<tr>
+    <td class="c">{{ num(loop.index) }}</td><td><span class="num">{{ fdate(r.date) }}</span></td>
+    <td>{% if d.doc_type == 'INVOICE' %}INV-{{ d.number }}{% else %}{{ t('doc_' + d.doc_type) }}{% endif %}</td>
+    <td>{{ d.description or (names.project.get(d.project_id, '') if d.project_id else '') }}</td>
+    <td class="n"><span class="num">{{ money(r.amount) }}</span></td><td class="n"><span class="num">{{ money(r.paid) }}</span></td><td class="n"><span class="num">{{ money(r.remaining) }}</span></td></tr>
+  {% else %}<tr><td colspan="7">{{ t('claim_nothing_due') }}</td></tr>{% endfor %}</tbody>
+  <tfoot>
+    <tr><td colspan="4">{{ t('claim_total_invoiced') }}</td><td class="n" colspan="3"><span class="num">{{ money(claim.invoiced) }}</span></td></tr>
+    <tr><td colspan="4">{{ t('claim_total_paid') }}</td><td class="n" colspan="3"><span class="num">{{ money(claim.paid) }}</span></td></tr>
+    <tr class="grand"><td colspan="4">{{ t('claim_total_due') }}</td><td class="n" colspan="3"><span class="num" data-testid="cm-total">{{ money(claim.balance) }} ₪</span></td></tr>
+  </tfoot></table>
+  {% if claim.balance > 0 %}<div class="words"><b>{{ t('cm_in_words') }}:</b><span data-testid="cm-words">{{ words }}</span></div>
+  <div class="letter section"><p>{{ t('claim_request') }}</p></div>{% endif %}
+  {% endif %}
+
+  {% if kind in ('invoice', 'claim') and info.bank_details %}<div class="section"><h3>{{ t('s_bank_details') }}</h3><div class="pre" data-testid="cm-bank">{{ info.bank_details }}</div></div>{% endif %}
+  {% if info.invoice_terms %}<div class="section pre">{{ info.invoice_terms }}</div>{% endif %}
+
+  <div class="sigs">
+    <div>{{ t('sig_accountant') }}</div>
+    <div>{{ t('cm_stamp') }}</div>
+    <div>{{ t('sig_manager') }}</div>
+  </div>
+  <div class="foot"><span>{{ co }}</span><span>{{ t('printed_at') }}: <span class="num">{{ now }}</span></span></div>
+</div>
+</body>
+</html>

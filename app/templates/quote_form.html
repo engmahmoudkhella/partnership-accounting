@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% from "macros.html" import csrf_field with context %}
+{% block title %}{{ t('quote_new') if not quote else t('cm_quote') ~ ' QT-' ~ quote.number }}{% endblock %}
+{% block content %}
+<h1>{{ t('quote_new') if not quote else t('cm_quote') ~ ' QT-' ~ quote.number }}</h1>
+<form method="post" action="/quotes/save" class="card form" data-testid="quote-form">{{ csrf_field() }}
+{% if quote %}<input type="hidden" name="id" value="{{ quote.id }}">{% endif %}
+<label>{{ t('f_customer_id') }} *<select name="customer_id" required data-testid="q-customer"><option value="">—</option>{% for o in opts.customer %}<option value="{{ o.id }}" {{ 'selected' if v.get('customer_id') == o.id|string }}>{{ o.name }}</option>{% endfor %}</select></label>
+<label>{{ t('f_project_id') }}<select name="project_id" data-testid="q-project"><option value="">—</option>{% for o in opts.project %}<option value="{{ o.id }}" {{ 'selected' if v.get('project_id') == o.id|string }}>{{ o.name }}</option>{% endfor %}</select><small class="muted">{{ t('help_quote_project') }}</small></label>
+<label>{{ t('f_date') }} *<input type="date" name="date" required value="{{ v.get('date', '') }}" data-testid="q-date"></label>
+<label>{{ t('f_valid_until') }}<input type="date" name="valid_until" value="{{ v.get('valid_until', '') }}" data-testid="q-valid"></label>
+<fieldset><legend>{{ t('quote_lines') }} *</legend>
+<div class="scroll"><table class="qlines"><thead><tr><th>{{ t('cm_item') }}</th><th class="n">{{ t('f_quantity') }}</th><th class="n">{{ t('f_unit_price') }}</th><th class="n">{{ t('f_line_total') }}</th></tr></thead><tbody>
+{% for r in rows %}<tr>
+<td><input name="desc_{{ loop.index }}" value="{{ r.desc }}" maxlength="300" placeholder="{{ t('ph_quote_item') if loop.first }}" data-testid="q-desc-{{ loop.index }}"></td>
+<td><input name="qty_{{ loop.index }}" value="{{ r.qty }}" inputmode="decimal" dir="ltr" class="qq" size="8" data-testid="q-qty-{{ loop.index }}"></td>
+<td><input name="price_{{ loop.index }}" value="{{ r.price }}" inputmode="decimal" dir="ltr" class="qp" size="8" data-testid="q-price-{{ loop.index }}"></td>
+<td class="n"><span class="num qt" dir="ltr"></span></td></tr>{% endfor %}
+</tbody><tfoot><tr><th colspan="3">{{ t('cm_total') }}</th><th class="n"><span class="num" dir="ltr" id="qtotal"></span></th></tr></tfoot></table></div>
+<small class="muted">{{ t('help_quote_lines') }}</small>
+</fieldset>
+<label>{{ t('f_notes') }}<textarea name="notes" rows="4" placeholder="{{ t('ph_quote_notes') }}" data-testid="q-notes">{{ v.get('notes', '') }}</textarea></label>
+<div class="actions"><button class="primary" data-testid="q-save">{{ t('btn_save') }}</button> <a class="btn" href="{{ '/quotes/' ~ quote.id if quote else '/quotes' }}">{{ t('btn_cancel') }}</a></div>
+</form>
+<script>
+(function(){
+  const toN = s => { s = (s||'').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[٫,]/g, m => m === '٫' ? '.' : '').trim(); const n = parseFloat(s); return isNaN(n) ? 0 : n; };
+  const fmt = n => n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  function calc(){ let tot = 0; document.querySelectorAll('.qlines tbody tr').forEach(tr => { const v = toN(tr.querySelector('.qq').value) * toN(tr.querySelector('.qp').value); tr.querySelector('.qt').textContent = v ? fmt(v) : ''; tot += v; }); document.getElementById('qtotal').textContent = fmt(tot); }
+  document.querySelector('.qlines').addEventListener('input', calc); calc();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% from "macros.html" import m with context %}
+{% block title %}{{ t('nav_quotes') }}{% endblock %}
+{% block content %}
+<h1>{{ t('nav_quotes') }}</h1>
+<p class="muted">{{ t('quotes_help') }}</p>
+<form class="filters" method="get">
+<select name="status"><option value="">{{ t('all_statuses') }}</option>{% for st in ['OPEN','ACCEPTED','CANCELLED'] %}<option value="{{ st }}" {{ 'selected' if request.query_params.get('status')==st }}>{{ t('qs_' + st) }}</option>{% endfor %}</select>
+<button>{{ t('btn_filter') }}</button>
+{% if user.role in ('admin','accountant') %}<a class="btn primary" href="/quotes/new" data-testid="quote-new">+ {{ t('quote_new') }}</a>{% endif %}
+</form>
+<section class="card"><div class="scroll"><table data-testid="quotes-table"><thead><tr><th>{{ t('col_number') }}</th><th>{{ t('f_date') }}</th><th>{{ t('f_customer_id') }}</th><th>{{ t('f_project_id') }}</th><th>{{ t('f_valid_until') }}</th><th class="n">{{ t('cm_total') }}</th><th>{{ t('col_status') }}</th></tr></thead><tbody>
+{% for q in quotes %}<tr class="{{ 'void' if q.status == 'CANCELLED' }}">
+<td><a href="/quotes/{{ q.id }}">QT-{{ q.number }}</a></td>
+<td><span class="num" dir="ltr">{{ fdate(q.date) }}</span></td>
+<td>{{ names.customer.get(q.customer_id, '') }}</td>
+<td>{{ names.project.get(q.project_id, '') }}</td>
+<td>{% if q.valid_until %}<span class="num" dir="ltr">{{ fdate(q.valid_until) }}</span>{% if q.status == 'OPEN' and q.valid_until < today %} <small class="field-error">{{ t('quote_expired') }}</small>{% endif %}{% endif %}</td>
+<td class="n">{{ m(q.total) }}</td>
+<td>{{ t('qs_' + q.status) }}</td></tr>
+{% else %}<tr><td colspan="7" class="muted">{{ t('empty') }}</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endblock %}

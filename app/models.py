@@ -436,3 +436,38 @@ class ContractRun(Base):
     document = relationship("Document")
 
     __table_args__ = (UniqueConstraint("contract_id", "period"),)
+
+
+# ------------------------------------------------------------------ quotations
+
+class Quote(Base):
+    """A price offer to a customer. It does not touch the accounts; when the customer accepts,
+    it is turned into invoices (one per line)."""
+    __tablename__ = "quotes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    number: Mapped[int] = mapped_column(Integer, unique=True)
+    date: Mapped[dt.date] = mapped_column(Date)
+    valid_until: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"))
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(20), default="OPEN")  # OPEN | ACCEPTED | CANCELLED
+    invoice_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+    lines = relationship("QuoteLine", cascade="all, delete-orphan", order_by="QuoteLine.id")
+
+    @property
+    def total(self) -> int:
+        return sum(ln.amount for ln in self.lines)
+
+
+class QuoteLine(Base):
+    __tablename__ = "quote_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    quote_id: Mapped[int] = mapped_column(ForeignKey("quotes.id", ondelete="CASCADE"))
+    description: Mapped[str] = mapped_column(String(300))
+    quantity: Mapped[int] = mapped_column(Integer)  # milli
+    unit_price: Mapped[int] = mapped_column(Integer)
+    amount: Mapped[int] = mapped_column(Integer)

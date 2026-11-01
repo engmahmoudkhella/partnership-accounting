@@ -4,7 +4,7 @@
 {% block content %}
 <h1>{{ t('doc_' + doc.doc_type) }} <span class="num">#{{ num(doc.number) }}</span> {{ status(doc.status) }}</h1>
 <p class="voucher-line">{{ vlabel(doc) }} · {{ t('voucher_no') }} <b class="num">{{ num(doc.number) }}</b>{% if doc.lines %} · {{ t('entry_no') }} <b class="num" data-testid="entry-no">{{ num(doc.id) }}</b>{% endif %}
-<a class="btn small" href="/documents/{{ doc.id }}/print" target="_blank" data-testid="print-voucher">🖨 {{ t('btn_print_voucher') }}</a></p>
+<a class="btn small" href="/documents/{{ doc.id }}/print" target="_blank" data-testid="print-voucher">🖨 {{ t('btn_print_voucher') }}</a>{% if doc.doc_type == 'INVOICE' %} <a class="btn small primary" href="/documents/{{ doc.id }}/invoice" target="_blank" data-testid="print-invoice">🧾 {{ t('btn_print_invoice') }}</a> <a class="btn small" href="/reports/customer/{{ doc.customer_id }}/claim" target="_blank">📨 {{ t('cm_claim') }}</a>{% endif %}</p>
 {% if locked %}<div class="note">🔒 {{ t('msg_month_locked_doc') }}</div>{% endif %}
 {% if doc.status == 'VOID' %}<div class="flash error">{{ t('msg_voided_by') }} {{ names.user.get(doc.voided_by, '') }} · {{ doc.voided_at.strftime('%Y-%m-%d %H:%M') if doc.voided_at }} — {{ doc.void_reason }}</div>{% endif %}
 <div class="grid2">

@@ -44,6 +44,7 @@ from .models import (
     Partner,
     Project,
     ProjectShareVersion,
+    Quote,
     ShareVersion,
     User,
 )
@@ -53,6 +54,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MAX_UPLOAD = 10 * 1024 * 1024
 UPLOAD_EXT = {".jpg": b"\xff\xd8\xff", ".jpeg": b"\xff\xd8\xff", ".png": b"\x89PNG\r\n\x1a\n",
               ".pdf": b"%PDF-", ".webp": b"RIFF"}
+
+
+COMPANY_KEYS = ("company_legal_name", "company_address", "company_phone", "company_email", "company_reg_no",
+                "company_tax_no", "bank_details", "invoice_terms")
 
 
 class Redirect(Exception):
@@ -529,12 +534,12 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
                 v[field] = "" if val is None else str(val)
         return v
 
-    async def save_upload(ctx: Ctx, form):
-        f = form.get("attachment")
+    async def save_upload(ctx: Ctx, form, field="attachment", images_only=False):
+        f = form.get(field)
         if f is None or not hasattr(f, "filename") or not f.filename:
             return None
         ext = os.path.splitext(f.filename)[1].lower()
-        if ext not in UPLOAD_EXT:
+        if ext not in UPLOAD_EXT or (images_only and ext == ".pdf"):
             raise BusinessError("err_upload_type")
         data = await f.read(MAX_UPLOAD + 1)
         if len(data) > MAX_UPLOAD:
@@ -998,6 +1003,159 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     MASTER = {"project": Project, "money_account": MoneyAccount, "customer": Customer, "supplier": Supplier,
               "item": Item}
 
+    # ------------------------------------------------------------ commercial documents
+
+    def company_info(ctx: Ctx) -> dict:
+        info = {k: ctx.L.get_setting(k, "") for k in COMPANY_KEYS}
+        info["company_logo"] = ctx.L.get_setting("company_logo", "")
+        info["company_name"] = ctx.L.get_setting("company_name", "")
+        return info
+
+    def render_commercial(ctx: Ctx, kind: str, **kw):
+        return render(ctx, "print_commercial.html", kind=kind, info=company_info(ctx), names=_names(ctx),
+                      now=dt.datetime.now().strftime("%Y-%m-%d %H:%M"), **kw)
+
+    @app.get("/quotes", response_class=HTMLResponse)
+    @page
+    async def quotes_page(ctx: Ctx):
+        require(ctx)
+        q = ctx.request.query_params
+        stmt = select(Quote).order_by(Quote.number.desc())
+        if q.get("status") in ("OPEN", "ACCEPTED", "CANCELLED"):
+            stmt = stmt.where(Quote.status == q["status"])
+        return render(ctx, "quotes.html", quotes=list(ctx.s.scalars(stmt)), names=_names(ctx))
+
+    def _quote_form(ctx: Ctx, quote, values=None):
+        rows = []
+        if values is None:
+            values = {}
+            if quote is not None:
+                values = {"date": quote.date.isoformat(), "valid_until": quote.valid_until.isoformat() if quote.valid_until else "",
+                          "customer_id": str(quote.customer_id), "project_id": str(quote.project_id or ""),
+                          "notes": quote.notes}
+                rows = [{"desc": ln.description, "qty": N.qty_input_value(ln.quantity),
+                         "price": N.money_input_value(ln.unit_price)} for ln in quote.lines]
+            else:
+                values = {"date": today_fn().isoformat(),
+                          "valid_until": (today_fn() + dt.timedelta(days=14)).isoformat()}
+        else:
+            rows = values.pop("_rows")
+        for _ in range(max(5 - len(rows), 2)):
+            rows.append({"desc": "", "qty": "", "price": ""})
+        return render(ctx, "quote_form.html", quote=quote, v=values, rows=rows, opts=form_options(ctx))
+
+    @app.get("/quotes/new", response_class=HTMLResponse)
+    @page
+    async def quote_new(ctx: Ctx):
+        require(ctx, "admin", "accountant")
+        return _quote_form(ctx, None)
+
+    @app.get("/quotes/{qid:int}/edit", response_class=HTMLResponse)
+    @page
+    async def quote_edit(ctx: Ctx, qid: int):
+        require(ctx, "admin", "accountant")
+        quote = get_or_404(ctx, Quote, qid)
+        if quote.status != "OPEN":
+            raise BusinessError("err_quote_not_open")
+        return _quote_form(ctx, quote)
+
+    @app.post("/quotes/save")
+    @page
+    async def quote_save(ctx: Ctx, form):
+        require(ctx, "admin", "accountant")
+        quote = None
+        qid = safe_id(form.get("id"))
+        if qid:
+            quote = get_or_404(ctx, Quote, qid)
+        lines, rows = [], []
+        for n in range(1, 101):
+            desc = (form.get(f"desc_{n}") or "").strip()
+            qraw = (form.get(f"qty_{n}") or "").strip()
+            praw = (form.get(f"price_{n}") or "").strip()
+            if not (desc or qraw or praw):
+                continue
+            rows.append({"desc": desc, "qty": qraw, "price": praw})
+        try:
+            for r in rows:
+                lines.append((r["desc"], N.parse_quantity(r["qty"]), N.parse_money(r["price"])))
+            quote = ctx.L.save_quote(
+                quote, date=parse_date(form.get("date", "")), valid_until=opt_date(form.get("valid_until")),
+                customer_id=safe_id(form.get("customer_id")), project_id=safe_id(form.get("project_id")),
+                notes=form.get("notes", ""), lines=lines)
+        except (BusinessError, N.NumberError) as e:
+            ctx.s.rollback()
+            values = {k: form.get(k, "") for k in ("date", "valid_until", "customer_id", "project_id", "notes")}
+            values["_rows"] = rows
+            flash(ctx.request, "error", err_text(ctx, e))
+            return _quote_form(ctx, quote if qid else None, values)
+        flash(ctx.request, "ok", ctx.t("msg_saved"))
+        raise_commit_redirect(ctx, f"/quotes/{quote.id}")
+
+    @app.get("/quotes/{qid:int}", response_class=HTMLResponse)
+    @page
+    async def quote_view(ctx: Ctx, qid: int):
+        require(ctx)
+        quote = get_or_404(ctx, Quote, qid)
+        rows = [{"description": ln.description, "quantity": ln.quantity, "unit_price": ln.unit_price,
+                 "amount": ln.amount} for ln in quote.lines]
+        invoices = [ctx.s.get(Document, i) for i in (quote.invoice_ids or [])]
+        return render_commercial(ctx, "quote", quote=quote, rows=rows, total=quote.total,
+                                 words=N.amount_in_words(quote.total, ctx.lang),
+                                 invoices=[d for d in invoices if d is not None])
+
+    @app.post("/quotes/{qid:int}/accept")
+    @page
+    async def quote_accept(ctx: Ctx, qid: int, form):
+        require(ctx, "admin", "accountant")
+        quote = get_or_404(ctx, Quote, qid)
+        d = opt_date(form.get("date")) or today_fn()
+        docs = ctx.L.accept_quote(quote, d)
+        flash(ctx.request, "ok", ctx.t("msg_quote_accepted", n=len(docs)))
+        raise_commit_redirect(ctx, f"/documents/{docs[0].id}/invoice" if len(docs) == 1 else f"/quotes/{qid}")
+
+    @app.post("/quotes/{qid:int}/cancel")
+    @page
+    async def quote_cancel(ctx: Ctx, qid: int, form):
+        require(ctx, "admin", "accountant")
+        ctx.L.cancel_quote(get_or_404(ctx, Quote, qid))
+        flash(ctx.request, "ok", ctx.t("msg_saved"))
+        raise_commit_redirect(ctx, f"/quotes/{qid}")
+
+    @app.post("/quotes/{qid:int}/delete")
+    @page
+    async def quote_delete(ctx: Ctx, qid: int, form):
+        require(ctx, "admin", "accountant")
+        ctx.L.delete_quote(get_or_404(ctx, Quote, qid))
+        flash(ctx.request, "ok", ctx.t("msg_deleted"))
+        raise_commit_redirect(ctx, "/quotes")
+
+    @app.get("/documents/{doc_id:int}/invoice", response_class=HTMLResponse)
+    @page
+    async def doc_invoice(ctx: Ctx, doc_id: int):
+        require(ctx)
+        doc = get_or_404(ctx, Document, doc_id)
+        if doc.doc_type != "INVOICE":
+            raise BusinessError("err_not_found")
+        rows = [{"description": doc.description or ctx.t("doc_INVOICE"), "quantity": doc.quantity,
+                 "unit_price": doc.unit_price, "amount": doc.amount}]
+        claim = ctx.L.customer_claim(doc.customer_id, dt.date.max) if doc.status == "POSTED" else None
+        paid = 0
+        if claim:
+            paid = next((r["paid"] for r in claim["dues"] if r["doc"].id == doc.id), 0)
+        return render_commercial(ctx, "invoice", doc=doc, rows=rows, total=doc.amount, paid=paid,
+                                 words=N.amount_in_words(doc.amount, ctx.lang))
+
+    @app.get("/reports/customer/{cid:int}/claim", response_class=HTMLResponse)
+    @page
+    async def customer_claim(ctx: Ctx, cid: int):
+        require(ctx)
+        c = get_or_404(ctx, Customer, cid)
+        as_of = opt_date(ctx.request.query_params.get("date")) or today_fn()
+        claim = ctx.L.customer_claim(cid, as_of)
+        show_all = ctx.request.query_params.get("all") == "1"
+        return render_commercial(ctx, "claim", customer=c, as_of=as_of, claim=claim, show_all=show_all,
+                                 total=claim["balance"], words=N.amount_in_words(max(claim["balance"], 0), ctx.lang))
+
     # ------------------------------------------------------------ monthly contracts
 
     def run_due_contracts(ctx):
@@ -1244,7 +1402,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     async def settings_page(ctx: Ctx):
         require(ctx, "admin")
         return render(ctx, "settings.html", threshold=N.money_input_value(ctx.L.approval_threshold),
-                      approvers=ctx.L.approvers())
+                      approvers=ctx.L.approvers(), info=company_info(ctx))
 
     @app.post("/settings")
     @page
@@ -1253,8 +1411,32 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         raw = (form.get("threshold") or "").strip()
         ctx.L.set_approval_threshold(N.parse_money(raw, allow_zero=True) if raw else 0)
         ctx.L.set_setting("company_name", (form.get("company_name") or "").strip()[:200])
+        info = company_info(ctx)
+        for key in COMPANY_KEYS:
+            val = (form.get(key) or "").strip()[:2000]
+            if val != info.get(key, ""):
+                ctx.L.set_setting(key, val)
+        logo = await save_upload(ctx, form, field="logo", images_only=True)
+        old_logo = info.get("company_logo", "")
+        if logo or form.get("remove_logo") == "1":
+            ctx.L.set_setting("company_logo", logo[0] if logo else "")
+            if old_logo:
+                ctx.L._remove_file(old_logo)
         flash(ctx.request, "ok", ctx.t("msg_saved"))
         raise_commit_redirect(ctx, "/settings")
+
+    @app.get("/settings/logo")
+    @page
+    async def settings_logo(ctx: Ctx):
+        require(ctx)
+        name = os.path.basename(ctx.L.get_setting("company_logo", ""))
+        path = os.path.join(upload_dir, name)
+        if not name or not os.path.exists(path):
+            raise BusinessError("err_not_found")
+        ext = os.path.splitext(path)[1].lower()
+        media = {".png": "image/png", ".webp": "image/webp"}.get(ext, "image/jpeg")
+        return FileResponse(path, media_type=media, headers={"X-Content-Type-Options": "nosniff",
+                                                             "Cache-Control": "private, max-age=300"})
 
     # ------------------------------------------------------------ months
 

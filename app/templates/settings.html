@@ -3,11 +3,23 @@
 {% block title %}{{ t('nav_settings') }}{% endblock %}
 {% block content %}
 <h1>{{ t('nav_settings') }}</h1>
-<form method="post" class="card form" data-testid="settings-form">{{ csrf_field() }}
+<form method="post" class="card form" enctype="multipart/form-data" data-testid="settings-form">{{ csrf_field() }}
 <label>{{ t('settings_company') }}<input name="company_name" value="{{ company }}"></label>
 <label>{{ t('settings_threshold') }}<input type="text" inputmode="decimal" dir="ltr" class="numin" data-kind="money0" name="threshold" value="{{ threshold }}" data-testid="threshold"><small class="preview" data-for="threshold"></small></label>
 <small class="muted">{{ t('help_threshold') }}</small>
 <p>{{ t('settings_approvers') }}: {% for u in approvers %}<b>{{ u.full_name }}</b>{% if not loop.last %}، {% endif %}{% else %}<span class="muted">{{ t('no_approvers') }}</span>{% endfor %}</p>
+<h2>{{ t('s_print_header') }}</h2>
+<small class="muted">{{ t('help_print_header') }}</small>
+<label>{{ t('s_legal_name') }}<input name="company_legal_name" maxlength="200" value="{{ info.company_legal_name }}" data-testid="s-legal"></label>
+<label>{{ t('s_address') }}<input name="company_address" maxlength="300" value="{{ info.company_address }}" data-testid="s-address"></label>
+<label>{{ t('s_phone') }}<input name="company_phone" maxlength="100" dir="ltr" value="{{ info.company_phone }}" data-testid="s-phone"></label>
+<label>{{ t('s_email') }}<input name="company_email" maxlength="200" dir="ltr" value="{{ info.company_email }}"></label>
+<label>{{ t('s_reg_no') }}<input name="company_reg_no" maxlength="100" dir="ltr" value="{{ info.company_reg_no }}"></label>
+<label>{{ t('s_tax_no') }}<input name="company_tax_no" maxlength="100" dir="ltr" value="{{ info.company_tax_no }}"></label>
+<label>{{ t('s_bank_details') }}<textarea name="bank_details" rows="3" placeholder="{{ t('ph_bank_details') }}" data-testid="s-bank">{{ info.bank_details }}</textarea></label>
+<label>{{ t('s_invoice_terms') }}<textarea name="invoice_terms" rows="3" data-testid="s-terms">{{ info.invoice_terms }}</textarea></label>
+<label>{{ t('s_logo') }}<input type="file" name="logo" accept=".png,.jpg,.jpeg,.webp" data-testid="s-logo"></label>
+{% if info.company_logo %}<p><img src="/settings/logo" alt="" style="max-height:60px"> <label class="inline"><input type="checkbox" name="remove_logo" value="1"> {{ t('s_remove_logo') }}</label></p>{% endif %}
 <button class="primary">{{ t('btn_save') }}</button>
 </form>
 <section class="card"><h2>{{ t('backup_title') }}</h2><p class="muted">{{ t('help_backup') }}</p><a class="btn" href="/backup">{{ t('btn_backup') }}</a></section>

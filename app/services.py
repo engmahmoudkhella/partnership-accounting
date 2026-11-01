@@ -38,6 +38,8 @@ from .models import (
     CallShare,
     Contract,
     ContractRun,
+    Quote,
+    QuoteLine,
     Customer,
     Document,
     JournalLine,
@@ -267,6 +269,121 @@ class Ledger:
         self.audit("create", "contract", c.id, None, {"name": c.name, "kind": kind, "amount": amount,
                                                       "start_date": start_date.isoformat(), "months": months})
         return c
+
+    # ------------------------------------------------------------ quotations
+
+    def _next_quote_number(self) -> int:
+        return (self.s.scalar(select(func.max(Quote.number))) or 0) + 1
+
+    def save_quote(self, quote: Quote | None, *, date: dt.date, valid_until: dt.date | None, customer_id,
+                   project_id, notes: str, lines: list) -> Quote:
+        """Create a quote, or replace an open one. ``lines``: [(description, quantity_milli, unit_price)]."""
+        self._require_role("admin", "accountant")
+        if quote is not None and quote.status != "OPEN":
+            raise BusinessError("err_quote_not_open")
+        if not isinstance(date, dt.date):
+            raise BusinessError("err_date_required")
+        if valid_until is not None and valid_until < date:
+            raise BusinessError("err_quote_valid_until")
+        if customer_id is None or self.s.get(Customer, customer_id) is None:
+            raise BusinessError("err_customer_required")
+        if project_id is not None and self.s.get(Project, project_id) is None:
+            raise BusinessError("err_not_found")
+        clean = []
+        for desc, q, price in lines:
+            desc = (desc or "").strip()[:300]
+            if not desc:
+                raise BusinessError("err_quote_line_desc")
+            if not isinstance(q, int) or q <= 0:
+                raise BusinessError("err_quantity_positive")
+            if not isinstance(price, int) or price <= 0:
+                raise BusinessError("err_price_positive")
+            clean.append((desc, q, price, line_total(q, price)))
+        if not clean:
+            raise BusinessError("err_quote_no_lines")
+        before = None
+        if quote is None:
+            quote = Quote(number=self._next_quote_number(), created_by=self.user.id if self.user else None)
+            self.s.add(quote)
+        else:
+            before = self.quote_snapshot(quote)
+            quote.lines.clear()
+            self.s.flush()
+        quote.date, quote.valid_until = date, valid_until
+        quote.customer_id, quote.project_id = customer_id, project_id
+        quote.notes = (notes or "").strip()
+        for desc, q, price, amt in clean:
+            quote.lines.append(QuoteLine(description=desc, quantity=q, unit_price=price, amount=amt))
+        self.s.flush()
+        self.audit("update" if before else "create", "quote", quote.id, before, self.quote_snapshot(quote))
+        return quote
+
+    def quote_snapshot(self, q: Quote) -> dict:
+        return {"number": q.number, "date": q.date.isoformat() if q.date else None,
+                "customer_id": q.customer_id, "project_id": q.project_id, "status": q.status,
+                "total": q.total, "lines": [[ln.description, ln.quantity, ln.unit_price] for ln in q.lines]}
+
+    def accept_quote(self, q: Quote, date: dt.date) -> list[Document]:
+        """The customer accepted: record one invoice per line (same project and customer)."""
+        self._require_role("admin", "accountant")
+        if q.status != "OPEN":
+            raise BusinessError("err_quote_not_open")
+        if q.project_id is None:
+            raise BusinessError("err_project_required")
+        before = self.quote_snapshot(q)
+        docs = []
+        for ln in q.lines:
+            docs.append(self.create_document("INVOICE", date, {
+                "customer_id": q.customer_id, "project_id": q.project_id, "quantity": ln.quantity,
+                "unit_price": ln.unit_price, "description": ln.description,
+                "ref_no": f"QT-{q.number}"}))
+        q.status = "ACCEPTED"
+        q.invoice_ids = [d.id for d in docs]
+        self.s.flush()
+        self.audit("accept", "quote", q.id, before, self.quote_snapshot(q))
+        return docs
+
+    def cancel_quote(self, q: Quote):
+        self._require_role("admin", "accountant")
+        if q.status != "OPEN":
+            raise BusinessError("err_quote_not_open")
+        before = self.quote_snapshot(q)
+        q.status = "CANCELLED"
+        self.audit("cancel", "quote", q.id, before, self.quote_snapshot(q))
+
+    def delete_quote(self, q: Quote):
+        self._require_role("admin", "accountant")
+        if q.status == "ACCEPTED":
+            raise BusinessError("err_quote_accepted")
+        self.audit("delete", "quote", q.id, self.quote_snapshot(q), None)
+        self.s.delete(q)
+        self.s.flush()
+
+    # ------------------------------------------------------------ financial claim (statement of dues)
+
+    def customer_claim(self, customer_id: int, as_of: dt.date) -> dict:
+        """What a customer owes on ``as_of``: every invoice (and opening balance) with the part
+        already paid. Payments settle the oldest invoices first."""
+        rows = self.s.execute(
+            select(JournalLine, Document).join(Document, Document.id == JournalLine.document_id)
+            .where(JournalLine.account == AR, JournalLine.customer_id == customer_id,
+                   Document.status == "POSTED", JournalLine.date <= as_of)
+            .order_by(JournalLine.date, Document.id, JournalLine.id)).all()
+        dues, paid_total, payments = [], 0, []
+        for ln, d in rows:
+            if ln.debit:
+                dues.append({"doc": d, "date": ln.date, "amount": ln.debit, "paid": 0})
+            if ln.credit:
+                paid_total += ln.credit
+                payments.append({"doc": d, "date": ln.date, "amount": ln.credit})
+        left = paid_total
+        for r in dues:
+            take = min(left, r["amount"])
+            r["paid"], left = take, left - take
+            r["remaining"] = r["amount"] - take
+        invoiced = sum(r["amount"] for r in dues)
+        return {"dues": dues, "payments": payments, "invoiced": invoiced, "paid": paid_total,
+                "balance": invoiced - paid_total, "open": [r for r in dues if r["remaining"]]}
 
     def contract_runs_done(self, c: Contract) -> int:
         return len(c.runs)
