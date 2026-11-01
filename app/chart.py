@@ -298,6 +298,8 @@ def voucher_kind(doc: Document) -> str:
         return "purchase"
     if t == "SUPPLIER_PAYMENT":
         return "payment" if doc.money_account_id else "journal"
+    if t == "STOCK_COUNT":
+        return "count"
     if t == "STOCK_ISSUE" or (t == "PRODUCTION" and doc.items):
         return "issue"
     if t in ("CAPITAL_CALL", "PRODUCTION"):

@@ -65,6 +65,11 @@
     {%- if asset %} · {{ asset.name }}{% endif -%}
     {%- if doc.project_id %} · {{ names.project.get(doc.project_id, '') }}{% endif %}</span></div>
   <div class="row"><span class="k">{{ t('into_account') if kind == 'receipt' else t('out_of_account') }}</span><span class="v">{{ names.money_account.get(doc.money_account_id, '') }}{% if doc.fee %} — {{ t('f_fee') }}: <span class="num" dir="ltr">{{ money(doc.fee) }}</span>, {{ t('f_amount') }}: <span class="num" dir="ltr">{{ money(cash_amount) }}</span>{% endif %}</span></div>
+  {% elif kind == 'count' %}
+  <div class="row"><span class="k">{{ t('f_description') }}</span><span class="v">{{ doc.description or t('doc_' + doc.doc_type) }}{% if doc.project_id %} · {{ names.project.get(doc.project_id, '') }}{% endif %}</span></div>
+  <table data-testid="voucher-items"><thead><tr><th>{{ t('f_item_id') }}</th><th class="n">{{ t('col_book_qty') }}</th><th class="n">{{ t('col_counted') }}</th><th class="n">{{ t('col_diff') }}</th><th class="n">{{ t('col_diff_value') }}</th></tr></thead><tbody>
+  {% for it in doc.items %}{% set item = names.item.get(it.item_id) %}{% set d = it.quantity - it.book_quantity %}<tr><td>{{ item.name if item else '' }}</td><td class="n">{{ qty(it.book_quantity) }}</td><td class="n">{{ qty(it.quantity) }} {{ item.unit if item else '' }}</td><td class="n">{{ ('+' if d > 0 else '') ~ qty(d) if d else '0' }}</td><td class="n">{{ ('-' if d < 0 else '+' if d > 0 else '') }}{{ money(it.amount) }}</td></tr>{% endfor %}
+  </tbody></table>
   {% elif kind in ('purchase', 'issue') %}
   {% if doc.supplier_id %}<div class="row"><span class="k">{{ t('f_supplier_id') }}</span><span class="v">{{ names.supplier.get(doc.supplier_id, '') }}</span></div>{% endif %}
   <div class="row"><span class="k">{{ t('f_description') }}</span><span class="v">{{ doc.description or t('doc_' + doc.doc_type) }}{% if doc.project_id %} · {{ names.project.get(doc.project_id, '') }}{% endif %}{% if doc.doc_type == 'PRODUCTION' %} · <span class="num" dir="ltr">{{ qty(doc.quantity) }}</span>{% endif %}</span></div>
@@ -86,7 +91,7 @@
 
   <div class="sigs">
     <div>{{ t('sig_accountant') }}</div>
-    {% if kind == 'receipt' %}<div>{{ t('sig_payer') }}</div>{% elif kind in ('payment', 'purchase', 'issue') %}<div>{{ t('sig_receiver') }}</div>{% endif %}
+    {% if kind == 'receipt' %}<div>{{ t('sig_payer') }}</div>{% elif kind in ('payment', 'purchase', 'issue') %}<div>{{ t('sig_receiver') }}</div>{% elif kind == 'count' %}<div>{{ t('sig_storekeeper') }}</div>{% endif %}
     <div>{{ t('sig_manager') }}</div>
   </div>
   <div class="foot"><span>{{ t('printed_at') }}: <span class="num" dir="ltr">{{ now }}</span> · {{ user.full_name }}</span><span>{{ t('status_' + doc.status) }}</span></div>

@@ -770,3 +770,26 @@ def test_supplier_overpay_asks_for_confirmation(ready):
     assert "flash ok" in r.text
     r = c.get("/inventory")
     assert "لنا عنده" in r.text and "500.00" in r.text
+
+
+def test_stock_count_via_form(ready):
+    c = ready
+    ids = c.ids
+    c.post("/master/supplier/save", {"name": "مورد"}, page="/master/supplier")
+    c.post("/master/item/save", {"name": "رز", "unit": "كغ", "category": "food"}, page="/master/item")
+    c.post("/master/item/save", {"name": "حطب", "unit": "كغ", "category": "fuel"}, page="/master/item")
+    s = c.db()
+    from app.models import Item, Supplier
+    sup = s.scalar(select(Supplier.id))
+    rice, wood = [i.id for i in s.scalars(select(Item).order_by(Item.id))]
+    s.close()
+    c.post("/documents/new/PURCHASE", {"date": "2026-10-03", "supplier_id": str(sup), "item_id_0": str(rice),
+                                       "qty_0": "100", "price_0": "9"}, page="/documents/new/PURCHASE")
+    r = c.get("/documents/new/STOCK_COUNT")
+    assert f'name="item_id_1"' in r.text and "الكمية بعد العد" in r.text  # every item listed
+    # rice counted 97.5 kg (2.5 short); firewood not counted (left empty)
+    r = c.post("/documents/new/STOCK_COUNT", {"date": "2026-10-04", "item_id_0": str(rice), "qty_0": "٩٧٫٥",
+                                              "item_id_1": str(wood), "qty_1": ""}, page="/documents/new/STOCK_COUNT")
+    assert "flash ok" in r.text and "محضر جرد" in r.text and "-2.5" in r.text and "22.50" in r.text
+    r = c.get("/reports/trial")
+    assert "✓" in r.text

@@ -40,6 +40,7 @@ ADDED_COLUMNS = [
     ("journal_lines", "item_id", "INTEGER REFERENCES items(id)"),
     ("journal_lines", "supplier_id", "INTEGER REFERENCES suppliers(id)"),
     ("journal_lines", "quantity", "INTEGER NOT NULL DEFAULT 0"),
+    ("document_items", "book_quantity", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 

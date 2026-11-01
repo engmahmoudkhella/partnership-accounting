@@ -205,3 +205,43 @@ def test_expense_on_credit_to_a_supplier_then_paid(kitchen):
     # one pay source only
     assert code(L.create_document, "EXPENSE", D(4), {"amount": 1, "category": "wages", "supplier_id": cook.id,
                                                      "money_account_id": w.cash.id}) == "err_pay_source"
+
+
+def test_stock_count_shortage_and_surplus(kitchen):
+    w = kitchen
+    buy_all(w)
+    L = w.L
+    L.create_document("PRODUCTION", D(3), {"project_id": w.kitchen.id, "quantity": 1_000 * KG})  # 400 kg rice, 150 kg beef
+    w.s.commit()
+    # count: rice 25.5 kg short (spoiled), beef exactly right, firewood 100 kg more than the books
+    doc = L.create_document("STOCK_COUNT", D(4), {"project_id": w.kitchen.id, "items": [
+        {"item_id": w.rice.id, "quantity": 9_574_500}, {"item_id": w.beef.id, "quantity": 4_850 * KG},
+        {"item_id": w.wood.id, "quantity": 5_100 * KG}]})
+    w.s.commit()
+    rows = {i.item_id: (i.book_quantity, i.quantity, i.amount) for i in doc.items}
+    assert rows[w.rice.id] == (9_600 * KG, 9_574_500, 22_950)  # 25.5 kg x 9.00
+    assert rows[w.beef.id] == (4_850 * KG, 4_850 * KG, 0)
+    assert rows[w.wood.id] == (5_000 * KG, 5_100 * KG, 80_000)  # 100 kg x 8.00 at average cost
+    assert L.stock_of(w.rice.id) == (9_574_500, 9_000_000 - 360_000 - 22_950)
+    assert L.stock_of(w.wood.id)[0] == 5_100 * KG
+    # net effect on profit: 229.50 loss - 800.00 surplus = +570.50 to the kitchen
+    from sqlalchemy import func
+    from app.models import JournalLine
+    net = w.s.scalar(select(func.sum(JournalLine.debit - JournalLine.credit)).where(
+        JournalLine.account == EXP, JournalLine.category == "stock_diff"))
+    assert net == 22_950 - 80_000
+    assert L.trial_balance()["sheet_ok"]
+    from app import chart
+    assert chart.voucher_kind(doc) == "count"
+    # counting a quantity at zero (all used up / thrown away) is allowed
+    doc2 = L.create_document("STOCK_COUNT", D(5), {"items": [{"item_id": w.spice.id, "quantity": 0}]})
+    w.s.commit()
+    assert L.stock_of(w.spice.id) == (0, 0) and doc2.items[0].amount == 500_000
+    # surplus of an item with nothing left in the books comes in at the last purchase price
+    L.create_document("STOCK_COUNT", D(6), {"items": [{"item_id": w.spice.id, "quantity": 2 * KG}]})
+    w.s.commit()
+    assert L.stock_of(w.spice.id) == (2 * KG, 10_000)
+    # voiding a count puts the books back
+    L.void_document(doc, "عدّ خاطئ")
+    w.s.commit()
+    assert L.stock_of(w.wood.id)[0] == 5_000 * KG

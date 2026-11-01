@@ -28,7 +28,7 @@
   {% set priced = doc_type == 'PURCHASE' %}
   {% set ns = namespace(last=-1) %}{% for n in range(40) %}{% if values.get('item_id_%d' % n) or values.get('qty_%d' % n) %}{% set ns.last = n %}{% endif %}{% endfor %}
   <fieldset class="items-box"><legend>{{ t('f_items') }} *</legend>
-  <div class="scroll"><table class="item-rows" id="item-rows" data-testid="item-rows"><thead><tr><th>{{ t('f_item_id') }}</th><th>{{ t('f_quantity') }}</th>{% if priced %}<th>{{ t('f_unit_price') }}</th><th class="n">{{ t('f_line_total') }}</th>{% else %}<th class="n">{{ t('col_in_stock') }}</th>{% endif %}</tr></thead><tbody>
+  <div class="scroll"><table class="item-rows" id="item-rows" data-testid="item-rows"><thead><tr><th>{{ t('f_item_id') }}</th><th>{{ t('col_counted') if doc_type == 'STOCK_COUNT' else t('f_quantity') }}</th>{% if priced %}<th>{{ t('f_unit_price') }}</th><th class="n">{{ t('f_line_total') }}</th>{% else %}<th class="n">{{ t('col_book_qty') if doc_type == 'STOCK_COUNT' else t('col_in_stock') }}</th>{% endif %}</tr></thead><tbody>
   {% for n in range([3, ns.last + 2]|max) %}<tr>
     <td><select name="item_id_{{ n }}" class="item-sel" data-testid="item-{{ n }}"><option value="">—</option>{% for o in opts.item %}<option value="{{ o.id }}" data-unit="{{ o.unit }}" data-stock="{{ qty(extra.stock.get(o.id, 0)) if extra.get('stock') else '' }}" {{ 'selected' if values.get('item_id_%d' % n) == o.id|string }}>{{ o.name }} ({{ o.unit }})</option>{% endfor %}</select></td>
     <td><input type="text" inputmode="decimal" autocomplete="off" name="qty_{{ n }}" value="{{ values.get('qty_%d' % n, '') }}" dir="ltr" class="numin it-qty" data-kind="qty" data-testid="qty-{{ n }}"><small class="preview"></small></td>

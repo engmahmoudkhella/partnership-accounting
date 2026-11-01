@@ -35,6 +35,7 @@ FORM_FIELDS: dict[str, list[tuple[str, str, bool]]] = {
     "SUPPLIER_PAYMENT": [("supplier_id", "supplier", True), ("amount", "money", True),
                          ("pay_source", "paysource", True)],
     "STOCK_ISSUE": [("project_id", "project", True), ("items", "items", True)],
+    "STOCK_COUNT": [("project_id", "project", False), ("items", "items", True)],
 }
 MAX_ITEM_ROWS = 40
 
@@ -120,7 +121,10 @@ def parse_document_form(doc_type: str, form) -> tuple[dict, dict, dict]:
                     iid, q, pr = (form.get(f"item_id_{n}") or ""), (form.get(f"qty_{n}") or ""), (form.get(f"price_{n}") or "")
                     if not (str(iid).strip() or str(q).strip() or str(pr).strip()):
                         continue
-                    row = {"item_id": _int_or_none(iid), "quantity": parse_quantity(q)}
+                    if doc_type == "STOCK_COUNT" and not str(q).strip():
+                        continue  # item listed but not counted
+                    row = {"item_id": _int_or_none(iid),
+                           "quantity": parse_quantity(q, allow_zero=(doc_type == "STOCK_COUNT"))}
                     if priced:
                         row["unit_price"] = parse_money(pr)
                     if row["item_id"] is None:

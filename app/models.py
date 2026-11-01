@@ -177,6 +177,7 @@ DOC_TYPES = (
     "PURCHASE",
     "SUPPLIER_PAYMENT",
     "STOCK_ISSUE",
+    "STOCK_COUNT",
 )
 # document types that never create ledger lines
 MEMO_TYPES = ("CAPITAL_CALL", "PRODUCTION")
@@ -197,6 +198,7 @@ EXPENSE_CATEGORIES = (
     "maintenance",
     "fees",
     "other",
+    "stock_diff",  # stock count: shortage / spoilage (debit) or surplus (credit)
 )
 
 
@@ -258,6 +260,7 @@ class DocumentItem(Base):
     quantity: Mapped[int] = mapped_column(Integer)  # thousandths
     unit_price: Mapped[int] = mapped_column(Integer, default=0)
     amount: Mapped[int] = mapped_column(Integer, default=0)
+    book_quantity: Mapped[int] = mapped_column(Integer, default=0)  # stock count: quantity in the books
 
 
 class OpeningLine(Base):

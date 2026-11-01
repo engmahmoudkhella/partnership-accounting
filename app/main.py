@@ -600,6 +600,9 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             raise BusinessError("err_not_found")
         ctx.L._can_create(doc_type)
         values = {"date": today_fn().isoformat(), "pay_source": "account"}
+        if doc_type == "STOCK_COUNT":  # list every active item, ready to type what was counted
+            for n, it in enumerate(ctx.s.scalars(select(Item).where(Item.active.is_(True)).order_by(Item.id))):
+                values[f"item_id_{n}"] = str(it.id)
         if safe_id(ctx.request.query_params.get("project")):
             values["project_id"] = str(safe_id(ctx.request.query_params["project"]))
         return render(ctx, "doc_form.html", doc_type=doc_type, doc=None, values=values, errors={},
@@ -619,7 +622,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             extra["threshold"] = ctx.L.approval_threshold
         if doc_type == "SUPPLIER_PAYMENT":
             extra["supplier_debts"] = {sp.id: ctx.L.supplier_owed(sp.id) for sp in ctx.s.scalars(select(Supplier))}
-        if doc_type in ("STOCK_ISSUE", "PRODUCTION"):
+        if doc_type in ("STOCK_ISSUE", "PRODUCTION", "STOCK_COUNT"):
             extra["stock"] = {i.id: ctx.L.stock_of(i.id)[0] for i in ctx.s.scalars(select(Item))}
         if doc_type == "PRODUCTION":
             items = {i.id: i for i in ctx.s.scalars(select(Item))}

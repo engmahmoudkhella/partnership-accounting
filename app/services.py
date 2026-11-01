@@ -64,7 +64,7 @@ CASH, AR, FA, CAP, DIST, REV, GAIN, EXP, LOSS = (
     "1100", "1200", "1500", "3100", "3200", "4100", "4900", "5100", "5900",
 )
 INV, AP = "1300", "2100"  # stock (by item) and amounts owed to suppliers (by supplier)
-STOCK_TYPES = ("PURCHASE", "STOCK_ISSUE", "PRODUCTION")
+STOCK_TYPES = ("PURCHASE", "STOCK_ISSUE", "PRODUCTION", "STOCK_COUNT")
 PL_CREDIT = (REV, GAIN)
 PL_DEBIT = (EXP, LOSS)
 
@@ -757,6 +757,7 @@ class Ledger:
         "PURCHASE": ("supplier_id", "project_id", "paid", "money_account_id", "paid_by_partner_id"),
         "SUPPLIER_PAYMENT": ("supplier_id", "amount", "money_account_id", "paid_by_partner_id"),
         "STOCK_ISSUE": ("project_id",),
+        "STOCK_COUNT": ("project_id",),
     }
     _EMPTY = {"amount": 0, "fee": 0, "quantity": 0, "unit_price": 0, "category": "", "supplier": "", "paid": 0}
     _ALL_FIELDS = ("partner_id", "partner2_id", "project_id", "customer_id", "money_account_id",
@@ -946,6 +947,9 @@ class Ledger:
         elif t == "STOCK_ISSUE":
             project(doc.project_id, required=True)
             self._check_items(doc, priced=False)
+        elif t == "STOCK_COUNT":
+            project(doc.project_id)
+            self._check_items(doc, priced=False, allow_zero=True)
 
     # ---------------------------------------------------------------- lines
 
@@ -1042,6 +1046,33 @@ class Ledger:
                               project_id=doc.project_id))
             if t == "STOCK_ISSUE":
                 doc.amount = total
+        elif t == "STOCK_COUNT":
+            # counted quantity vs the books on that day: a shortage (spoilage, loss) leaves stock at average
+            # cost as an expense; a surplus comes in at average cost (or the last purchase price)
+            total = 0
+            for it in doc.items:
+                item = self.s.get(Item, it.item_id)
+                have, value = self.stock_of(item.id, doc.date, exclude_doc_id=doc.id)
+                it.book_quantity = have
+                diff = it.quantity - have
+                if diff < 0:
+                    it.amount = self._issue_cost(item, -diff, doc.date, doc.id)
+                    L.append(Line(EXP, debit=it.amount, project_id=doc.project_id, category="stock_diff"))
+                    L.append(Line(INV, credit=it.amount, item_id=item.id, quantity=diff, project_id=doc.project_id))
+                elif diff > 0:
+                    if have > 0:
+                        it.amount = round_half_up_div(value * diff, have)
+                    else:
+                        last = self.s.scalar(select(DocumentItem.unit_price).join(Document).where(
+                            DocumentItem.item_id == item.id, Document.doc_type == "PURCHASE",
+                            Document.status == "POSTED").order_by(Document.date.desc(), Document.id.desc()))
+                        it.amount = line_total(diff, last or 0)
+                    L.append(Line(INV, debit=it.amount, item_id=item.id, quantity=diff, project_id=doc.project_id))
+                    L.append(Line(EXP, credit=it.amount, project_id=doc.project_id, category="stock_diff"))
+                else:
+                    it.amount = 0
+                total += it.amount
+            doc.amount = total
         return L
 
     def distribution_weights(self, d: dt.date, exclude_doc_id: int | None = None) -> list[tuple[int, int]]:
@@ -1132,14 +1163,14 @@ class Ledger:
             iid, q, price = row.get("item_id"), row.get("quantity") or 0, row.get("unit_price") or 0
             if iid is None and not q:
                 continue
-            if doc.doc_type == "STOCK_ISSUE":
+            if doc.doc_type in ("STOCK_ISSUE", "STOCK_COUNT"):
                 merged[iid] = merged.get(iid, 0) + q
             else:
                 doc.items.append(DocumentItem(item_id=iid, quantity=q, unit_price=price))
         for iid, q in merged.items():
             doc.items.append(DocumentItem(item_id=iid, quantity=q))
 
-    def _check_items(self, doc: Document, priced: bool):
+    def _check_items(self, doc: Document, priced: bool, allow_zero: bool = False):
         if not doc.items:
             raise BusinessError("err_items_required")
         for it in doc.items:
@@ -1150,7 +1181,7 @@ class Ledger:
                 raise BusinessError("err_not_found")
             if not item.active:
                 raise BusinessError("err_item_inactive", item=item.name)
-            if not isinstance(it.quantity, int) or it.quantity <= 0:
+            if not isinstance(it.quantity, int) or it.quantity < 0 or (it.quantity == 0 and not allow_zero):
                 raise BusinessError("err_quantity_positive")
             if priced:
                 if not isinstance(it.unit_price, int) or it.unit_price <= 0:
