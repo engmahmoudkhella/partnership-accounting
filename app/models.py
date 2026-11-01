@@ -135,6 +135,7 @@ class MoneyAccount(Base):
     name: Mapped[str] = mapped_column(String(200), unique=True)
     kind: Mapped[str] = mapped_column(String(20), default="cash")  # cash, bank, wallet
     holder: Mapped[str] = mapped_column(String(200), default="")
+    currency: Mapped[str] = mapped_column(String(3), default="")  # "" = shekel, "USD"
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
 
@@ -264,6 +265,11 @@ class Document(Base):
     paid_by_partner_id: Mapped[int | None] = mapped_column(ForeignKey("partners.id"), nullable=True)
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id"), nullable=True)
     paid: Mapped[int] = mapped_column(Integer, default=0)  # purchase: paid now; the rest is owed to the supplier
+    # foreign currency: amounts above are always shekels; these keep what was typed in dollars
+    currency: Mapped[str] = mapped_column(String(3), default="")  # "" = shekel, "USD"
+    fx_amount: Mapped[int] = mapped_column(Integer, default=0)  # dollar cents (money side / invoice total)
+    fx_amount2: Mapped[int] = mapped_column(Integer, default=0)  # transfer: dollar cents received
+    rate: Mapped[int] = mapped_column(Integer, default=0)  # shekels per dollar x 10,000
 
     attachment: Mapped[str] = mapped_column(String(300), default="")
     attachment_name: Mapped[str] = mapped_column(String(300), default="")
@@ -307,6 +313,7 @@ class OpeningLine(Base):
     asset_id: Mapped[int | None] = mapped_column(ForeignKey("assets.id"), nullable=True)
     partner_id: Mapped[int | None] = mapped_column(ForeignKey("partners.id"), nullable=True)
     amount: Mapped[int] = mapped_column(Integer)
+    fx: Mapped[int] = mapped_column(Integer, default=0)  # dollar cents, for a dollar account
 
 
 class CallShare(Base):
@@ -358,6 +365,8 @@ class JournalLine(Base):
     quantity: Mapped[int] = mapped_column(Integer, default=0)  # stock lines: + in / - out, thousandths
     debit: Mapped[int] = mapped_column(Integer, default=0)
     credit: Mapped[int] = mapped_column(Integer, default=0)
+    currency: Mapped[str] = mapped_column(String(3), default="")  # "USD" on dollar cash / receivable lines
+    fx: Mapped[int] = mapped_column(Integer, default=0)  # dollar cents: + debit / - credit
 
     document = relationship("Document", back_populates="lines")
 
@@ -418,6 +427,7 @@ class Contract(Base):
     money_account_id: Mapped[int | None] = mapped_column(ForeignKey("money_accounts.id"), nullable=True)
     paid_by_partner_id: Mapped[int | None] = mapped_column(ForeignKey("partners.id"), nullable=True)
     supplier: Mapped[str] = mapped_column(String(200), default="")
+    currency: Mapped[str] = mapped_column(String(3), default="")  # income contracts may be in dollars
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_error: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
@@ -452,6 +462,7 @@ class Quote(Base):
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
     notes: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(20), default="OPEN")  # OPEN | ACCEPTED | CANCELLED
+    currency: Mapped[str] = mapped_column(String(3), default="")
     invoice_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)

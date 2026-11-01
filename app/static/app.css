@@ -193,3 +193,6 @@ table.journal-book tr.cr td.jn{padding-inline-start:2rem}
 .t-inv{--accent:#2bb3c0}.t-pay{--accent:#b42318}
 .warnbox{background:var(--pend-l);border-color:#f3d39c;color:var(--pend);font-weight:600}.confirm-box{display:flex;gap:.5rem;align-items:center;background:var(--pend-l);border:1px solid #f3d39c;border-radius:10px;padding:.6rem .8rem;margin:.6rem 0}
 .vk-count{color:#6d5bd0;border-color:#d4cdf5;background:#f6f4fe}
+[hidden]{display:none !important}
+.pill-cur{display:inline-block;font-size:.72em;padding:0 .45em;border-radius:20px;background:#e8f1f6;color:#0f6b8f;font-weight:700}
+.cur-tag{color:#0f6b8f}

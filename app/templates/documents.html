@@ -22,7 +22,7 @@
 <td><span class="num">{{ num(d.number) }}</span></td>
 <td>{{ names.partner.get(d.partner_id) or names.partner.get(d.paid_by_partner_id) or names.customer.get(d.customer_id) or '' }}{% if d.project_id %} · {{ names.project.get(d.project_id) }}{% endif %}{% if d.category %} · {{ t('cat_' + d.category) }}{% endif %}</td>
 <td>{{ d.description }}</td>
-<td class="n">{% if d.doc_type == 'PRODUCTION' %}<span class="num" dir="ltr">{{ qty(d.quantity) }}</span>{% else %}{{ m(d.amount) }}{% endif %}</td>
+<td class="n">{% if d.doc_type == 'PRODUCTION' %}<span class="num" dir="ltr">{{ qty(d.quantity) }}</span>{% else %}{{ m(d.amount) }}{% if d.currency == 'USD' and (d.fx_amount or d.fx_amount2) %}<br><small class="num" dir="ltr">{{ usd(d.fx_amount or d.fx_amount2) }}</small>{% endif %}{% endif %}</td>
 <td>{{ status(d.status) }}</td></tr>
 {% else %}<tr><td colspan="7" class="muted">{{ t('empty') }}</td></tr>{% endfor %}
 </tbody></table></div>

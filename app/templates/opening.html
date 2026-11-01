@@ -13,7 +13,9 @@
 {% if errors.get('date') %}<div class="field-error">{{ errors.date }}</div>{% endif %}
 <h2>{{ t('opening_assets_side') }}</h2>
 <h3>{{ t('nav_accounts') }}</h3>
-{% for a in accounts %}<label>{{ a.name }}<input class="numin ob-debit" type="text" inputmode="decimal" dir="ltr" name="m_{{ a.id }}" value="{{ values.get('m_%d' % a.id, '') }}" data-kind="money0" data-testid="m-{{ a.id }}"><small class="preview" data-for="m_{{ a.id }}"></small></label>
+{% if accounts|selectattr('currency', 'equalto', 'USD')|list %}<label>{{ t('f_opening_rate') }}<input type="text" inputmode="decimal" dir="ltr" name="opening_rate" value="{{ values.get('opening_rate','') }}" placeholder="3.65" data-testid="opening-rate"><small class="muted">{{ t('help_opening_rate') }}</small></label>
+{% if errors.get('opening_rate') %}<div class="field-error">{{ errors.opening_rate }}</div>{% endif %}{% endif %}
+{% for a in accounts %}<label>{{ a.name }}{% if a.currency == 'USD' %} <b>($)</b>{% endif %}<input class="numin {{ 'ob-usd' if a.currency == 'USD' else 'ob-debit' }}" type="text" inputmode="decimal" dir="ltr" name="m_{{ a.id }}" value="{{ values.get('m_%d' % a.id, '') }}" data-kind="money0" data-testid="m-{{ a.id }}"><small class="preview" data-for="m_{{ a.id }}"></small></label>
 {% if errors.get('m_%d' % a.id) %}<div class="field-error">{{ errors['m_%d' % a.id] }}</div>{% endif %}{% else %}<p class="muted">{{ t('empty') }} — <a href="/master/money_account">{{ t('nav_accounts') }}</a></p>{% endfor %}
 <h3>{{ t('opening_receivables') }}</h3>
 {% for c in customers %}<label>{{ c.name }}<input class="numin ob-debit" type="text" inputmode="decimal" dir="ltr" name="c_{{ c.id }}" value="{{ values.get('c_%d' % c.id, '') }}" data-kind="money0" data-testid="c-{{ c.id }}"><small class="preview" data-for="c_{{ c.id }}"></small></label>

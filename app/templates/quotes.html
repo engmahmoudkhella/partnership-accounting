@@ -16,7 +16,7 @@
 <td>{{ names.customer.get(q.customer_id, '') }}</td>
 <td>{{ names.project.get(q.project_id, '') }}</td>
 <td>{% if q.valid_until %}<span class="num" dir="ltr">{{ fdate(q.valid_until) }}</span>{% if q.status == 'OPEN' and q.valid_until < today %} <small class="field-error">{{ t('quote_expired') }}</small>{% endif %}{% endif %}</td>
-<td class="n">{{ m(q.total) }}</td>
+<td class="n">{% if q.currency == 'USD' %}<span class="num" dir="ltr">{{ usd(q.total) }}</span>{% else %}{{ m(q.total) }}{% endif %}</td>
 <td>{{ t('qs_' + q.status) }}</td></tr>
 {% else %}<tr><td colspan="7" class="muted">{{ t('empty') }}</td></tr>{% endfor %}
 </tbody></table></div></section>

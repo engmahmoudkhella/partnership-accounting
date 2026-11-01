@@ -7,6 +7,7 @@
 {% if quote %}<input type="hidden" name="id" value="{{ quote.id }}">{% endif %}
 <label>{{ t('f_customer_id') }} *<select name="customer_id" required data-testid="q-customer"><option value="">—</option>{% for o in opts.customer %}<option value="{{ o.id }}" {{ 'selected' if v.get('customer_id') == o.id|string }}>{{ o.name }}</option>{% endfor %}</select></label>
 <label>{{ t('f_project_id') }}<select name="project_id" data-testid="q-project"><option value="">—</option>{% for o in opts.project %}<option value="{{ o.id }}" {{ 'selected' if v.get('project_id') == o.id|string }}>{{ o.name }}</option>{% endfor %}</select><small class="muted">{{ t('help_quote_project') }}</small></label>
+<label>{{ t('f_currency') }}<select name="currency" data-testid="q-currency"><option value="">{{ t('cur_ILS') }}</option><option value="USD" {{ 'selected' if v.get('currency') == 'USD' }}>{{ t('cur_USD') }}</option></select></label>
 <label>{{ t('f_date') }} *<input type="date" name="date" required value="{{ v.get('date', '') }}" data-testid="q-date"></label>
 <label>{{ t('f_valid_until') }}<input type="date" name="valid_until" value="{{ v.get('valid_until', '') }}" data-testid="q-valid"></label>
 <fieldset><legend>{{ t('quote_lines') }} *</legend>

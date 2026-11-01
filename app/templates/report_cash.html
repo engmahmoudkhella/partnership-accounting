@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% from "macros.html" import m with context %}
 {% block title %}{{ ma.name }}{% endblock %}
-{% block content %}
+{% block content %}{% set u = ma.currency == 'USD' %}
 <h1>{{ t('rep_cash') }}: {{ ma.name }}</h1>
 <form class="filters"><label class="inline">{{ t('from') }} <input type="date" name="from" value="{{ d1.isoformat() if d1 else '' }}"></label><label class="inline">{{ t('to') }} <input type="date" name="to" value="{{ d2.isoformat() if d2 else '' }}"></label><button>{{ t('btn_filter') }}</button></form>
-<section class="card"><div class="scroll"><table data-testid="cash-ledger"><thead><tr><th>{{ t('f_date') }}</th><th>{{ t('col_type') }}</th><th>{{ t('f_description') }}</th><th class="n">{{ t('col_in') }}</th><th class="n">{{ t('col_out') }}</th><th class="n">{{ t('col_balance') }}</th></tr></thead><tbody>
-<tr class="muted"><td colspan="5">{{ t('opening_balance_row') }}</td><td class="n">{{ m(opening) }}</td></tr>
-{% for r in rows %}<tr><td><span class="num" dir="ltr">{{ fdate(r.line.date) }}</span></td><td><a href="/documents/{{ r.doc.id }}">{{ t('doc_' + r.doc.doc_type) }} #{{ num(r.doc.number) }}</a></td><td>{{ r.doc.description }}</td><td class="n">{% if r['in'] %}{{ m(r['in']) }}{% endif %}</td><td class="n">{% if r.out %}{{ m(r.out) }}{% endif %}</td><td class="n">{{ m(r.balance) }}</td></tr>{% endfor %}
-</tbody><tfoot><tr><th colspan="5">{{ t('closing_balance') }}</th><th class="n" data-testid="closing">{{ m(closing) }}</th></tr></tfoot></table></div></section>
+<section class="card"><div class="scroll"><table data-testid="cash-ledger"><thead><tr><th>{{ t('f_date') }}</th><th>{{ t('col_type') }}</th><th>{{ t('f_description') }}</th>{% if u %}<th class="n">{{ t('col_in') }} ($)</th><th class="n">{{ t('col_out') }} ($)</th><th class="n">{{ t('col_balance') }} ($)</th>{% endif %}<th class="n">{{ t('col_in') }}{% if u %} (₪){% endif %}</th><th class="n">{{ t('col_out') }}{% if u %} (₪){% endif %}</th><th class="n">{{ t('col_balance') }}{% if u %} (₪){% endif %}</th></tr></thead><tbody>
+<tr class="muted"><td colspan="{{ 5 if not u else 3 }}">{{ t('opening_balance_row') }}</td>{% if u %}<td></td><td></td><td class="n"><span class="num" dir="ltr">{{ usd(fx_open) }}</span></td><td></td><td></td>{% endif %}<td class="n">{{ m(opening) }}</td></tr>
+{% for r in rows %}<tr><td><span class="num" dir="ltr">{{ fdate(r.line.date) }}</span></td><td><a href="/documents/{{ r.doc.id }}">{{ t('doc_' + r.doc.doc_type) }} #{{ num(r.doc.number) }}</a></td><td>{{ r.doc.description }}</td>{% if u %}<td class="n">{% if r.fx_in %}<span class="num" dir="ltr">{{ usd(r.fx_in) }}</span>{% endif %}</td><td class="n">{% if r.fx_out %}<span class="num" dir="ltr">{{ usd(r.fx_out) }}</span>{% endif %}</td><td class="n"><b class="num" dir="ltr">{{ usd(r.fx_balance) }}</b></td>{% endif %}<td class="n">{% if r['in'] %}{{ m(r['in']) }}{% endif %}</td><td class="n">{% if r.out %}{{ m(r.out) }}{% endif %}</td><td class="n">{{ m(r.balance) }}</td></tr>{% endfor %}
+</tbody><tfoot><tr><th colspan="{{ 5 if not u else 3 }}">{{ t('closing_balance') }}</th>{% if u %}<th></th><th></th><th class="n" data-testid="closing-usd"><span class="num" dir="ltr">{{ usd(fx_close) }}</span></th><th></th><th></th>{% endif %}<th class="n" data-testid="closing">{{ m(closing) }}</th></tr></tfoot></table></div></section>
 {% endblock %}

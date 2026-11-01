@@ -61,7 +61,7 @@ from .models import (
     User,
     utcnow,
 )
-from .numbers import PPM_TOTAL, allocate, line_total, round_half_up_div
+from .numbers import PPM_TOTAL, allocate, convert, line_total, round_half_up_div
 from .numbers import format_quantity as N_format_quantity
 
 CASH, AR, FA, CAP, DIST, REV, GAIN, EXP, LOSS = (
@@ -127,6 +127,8 @@ class Line:
     item_id: int | None = None
     supplier_id: int | None = None
     quantity: int = 0
+    currency: str = ""
+    fx: int = 0
 
 
 class Ledger:
@@ -228,7 +230,7 @@ class Ledger:
     def save_contract(self, *, name: str, kind: str, amount: int, start_date: dt.date, months: int,
                       project_id: int | None = None, customer_id: int | None = None, category: str = "rent",
                       money_account_id: int | None = None, paid_by_partner_id: int | None = None,
-                      supplier: str = "") -> Contract:
+                      supplier: str = "", currency: str = "") -> Contract:
         self._require_role("admin", "accountant")
         name = (name or "").strip()
         if not name:
@@ -250,8 +252,11 @@ class Ledger:
                 raise BusinessError("err_project_required")
             money_account_id = paid_by_partner_id = None
             category = ""
+            if currency not in ("", "USD"):
+                raise BusinessError("err_invalid_choice")
         else:
             customer_id = None
+            currency = ""
             if category not in EXPENSE_CATEGORIES:
                 raise BusinessError("err_invalid_choice")
             if (money_account_id is None) == (paid_by_partner_id is None):
@@ -263,7 +268,8 @@ class Ledger:
         c = Contract(name=name, kind=kind, amount=amount, start_date=start_date, months=months,
                      project_id=project_id, customer_id=customer_id, category=category,
                      money_account_id=money_account_id, paid_by_partner_id=paid_by_partner_id,
-                     supplier=(supplier or "").strip(), created_by=self.user.id if self.user else None)
+                     supplier=(supplier or "").strip(), currency=currency,
+                     created_by=self.user.id if self.user else None)
         self.s.add(c)
         self.s.flush()
         self.audit("create", "contract", c.id, None, {"name": c.name, "kind": kind, "amount": amount,
@@ -276,7 +282,7 @@ class Ledger:
         return (self.s.scalar(select(func.max(Quote.number))) or 0) + 1
 
     def save_quote(self, quote: Quote | None, *, date: dt.date, valid_until: dt.date | None, customer_id,
-                   project_id, notes: str, lines: list) -> Quote:
+                   project_id, notes: str, lines: list, currency: str = "") -> Quote:
         """Create a quote, or replace an open one. ``lines``: [(description, quantity_milli, unit_price)]."""
         self._require_role("admin", "accountant")
         if quote is not None and quote.status != "OPEN":
@@ -289,6 +295,8 @@ class Ledger:
             raise BusinessError("err_customer_required")
         if project_id is not None and self.s.get(Project, project_id) is None:
             raise BusinessError("err_not_found")
+        if currency not in ("", "USD"):
+            raise BusinessError("err_invalid_choice")
         clean = []
         for desc, q, price in lines:
             desc = (desc or "").strip()[:300]
@@ -312,6 +320,7 @@ class Ledger:
         quote.date, quote.valid_until = date, valid_until
         quote.customer_id, quote.project_id = customer_id, project_id
         quote.notes = (notes or "").strip()
+        quote.currency = currency
         for desc, q, price, amt in clean:
             quote.lines.append(QuoteLine(description=desc, quantity=q, unit_price=price, amount=amt))
         self.s.flush()
@@ -319,11 +328,11 @@ class Ledger:
         return quote
 
     def quote_snapshot(self, q: Quote) -> dict:
-        return {"number": q.number, "date": q.date.isoformat() if q.date else None,
+        return {"number": q.number, "date": q.date.isoformat() if q.date else None, "currency": q.currency,
                 "customer_id": q.customer_id, "project_id": q.project_id, "status": q.status,
                 "total": q.total, "lines": [[ln.description, ln.quantity, ln.unit_price] for ln in q.lines]}
 
-    def accept_quote(self, q: Quote, date: dt.date) -> list[Document]:
+    def accept_quote(self, q: Quote, date: dt.date, rate: int | None = None) -> list[Document]:
         """The customer accepted: record one invoice per line (same project and customer)."""
         self._require_role("admin", "accountant")
         if q.status != "OPEN":
@@ -336,7 +345,7 @@ class Ledger:
             docs.append(self.create_document("INVOICE", date, {
                 "customer_id": q.customer_id, "project_id": q.project_id, "quantity": ln.quantity,
                 "unit_price": ln.unit_price, "description": ln.description,
-                "ref_no": f"QT-{q.number}"}))
+                "ref_no": f"QT-{q.number}", "currency": q.currency, "rate": rate}))
         q.status = "ACCEPTED"
         q.invoice_ids = [d.id for d in docs]
         self.s.flush()
@@ -361,29 +370,61 @@ class Ledger:
 
     # ------------------------------------------------------------ financial claim (statement of dues)
 
-    def customer_claim(self, customer_id: int, as_of: dt.date) -> dict:
-        """What a customer owes on ``as_of``: every invoice (and opening balance) with the part
-        already paid. Payments settle the oldest invoices first."""
+    def customer_due(self, customer_id, as_of: dt.date, currency: str = "", exclude_doc_id=None) -> int:
+        """What a customer owes in one currency (dollar cents for "USD", agorot otherwise)."""
+        val = JournalLine.fx if currency == "USD" else JournalLine.debit - JournalLine.credit
+        return int(self.s.scalar(select(func.coalesce(func.sum(val), 0)).where(
+            JournalLine.account == AR, JournalLine.customer_id == customer_id,
+            JournalLine.currency == currency, JournalLine.date <= as_of,
+            JournalLine.document_id != (exclude_doc_id or 0))))
+
+    def fx_balance(self, money_account_id: int, as_of: dt.date | None = None) -> int:
+        """Dollars held in a dollar account (cents)."""
+        q = select(func.coalesce(func.sum(JournalLine.fx), 0)).where(
+            JournalLine.account == CASH, JournalLine.money_account_id == money_account_id,
+            JournalLine.currency == "USD")
+        if as_of is not None:
+            q = q.where(JournalLine.date <= as_of)
+        return int(self.s.scalar(q))
+
+    def customer_currencies(self, customer_id: int) -> list[str]:
+        return [c for (c,) in self.s.execute(select(JournalLine.currency).where(
+            JournalLine.account == AR, JournalLine.customer_id == customer_id).distinct())] or [""]
+
+    def customer_claim(self, customer_id: int, as_of: dt.date, currency: str = "") -> dict:
+        """What a customer owes on ``as_of`` in one currency: every invoice (and opening balance) with
+        the part already paid. Payments settle the oldest invoices first. Dollar claims are in dollars."""
         rows = self.s.execute(
             select(JournalLine, Document).join(Document, Document.id == JournalLine.document_id)
             .where(JournalLine.account == AR, JournalLine.customer_id == customer_id,
+                   JournalLine.currency == currency,
                    Document.status == "POSTED", JournalLine.date <= as_of)
             .order_by(JournalLine.date, Document.id, JournalLine.id)).all()
         dues, paid_total, payments = [], 0, []
+        usd = currency == "USD"
         for ln, d in rows:
-            if ln.debit:
-                dues.append({"doc": d, "date": ln.date, "amount": ln.debit, "paid": 0})
-            if ln.credit:
-                paid_total += ln.credit
-                payments.append({"doc": d, "date": ln.date, "amount": ln.credit})
+            dr = ln.fx if usd and ln.fx > 0 else (0 if usd else ln.debit)
+            cr = -ln.fx if usd and ln.fx < 0 else (0 if usd else ln.credit)
+            if dr:
+                dues.append({"doc": d, "date": ln.date, "amount": dr, "paid": 0})
+            if cr:
+                paid_total += cr
+                payments.append({"doc": d, "date": ln.date, "amount": cr})
         left = paid_total
         for r in dues:
             take = min(left, r["amount"])
             r["paid"], left = take, left - take
             r["remaining"] = r["amount"] - take
         invoiced = sum(r["amount"] for r in dues)
-        return {"dues": dues, "payments": payments, "invoiced": invoiced, "paid": paid_total,
+        return {"currency": currency, "dues": dues, "payments": payments, "invoiced": invoiced, "paid": paid_total,
                 "balance": invoiced - paid_total, "open": [r for r in dues if r["remaining"]]}
+
+    def usd_rate(self) -> int:
+        """The current dollar rate kept in the settings (x10,000); 0 when not set."""
+        try:
+            return int(self.get_setting("usd_rate", "0") or 0)
+        except ValueError:
+            return 0
 
     def contract_runs_done(self, c: Contract) -> int:
         return len(c.runs)
@@ -410,7 +451,8 @@ class Ledger:
                     if c.kind == "income":
                         doc = self.create_document("INVOICE", d, {
                             "customer_id": c.customer_id, "project_id": c.project_id, "quantity": 1000,
-                            "unit_price": c.amount, "description": desc})
+                            "unit_price": c.amount, "description": desc, "currency": c.currency or "",
+                            "rate": self.usd_rate() if c.currency else None})
                     else:
                         doc = self.create_document("EXPENSE", d, {
                             "category": c.category, "project_id": c.project_id, "amount": c.amount,
@@ -728,6 +770,12 @@ class Ledger:
                 raise BusinessError("err_invalid_choice")
             if not (fields.get("unit") or "").strip():
                 raise BusinessError("err_unit_required")
+        if entity == "money_account":
+            if fields.get("currency", "") not in ("", "USD"):
+                raise BusinessError("err_invalid_choice")
+            if obj is not None and (obj.currency or "") != fields.get("currency", "") \
+                    and self.master_references("money_account", obj.id):
+                raise BusinessError("err_currency_in_use")
         before = self._entity_snapshot(obj) if obj else None
         if obj is None:
             obj = model(name=name)
@@ -988,6 +1036,76 @@ class Ledger:
                 setattr(doc, f, None if f not in self._EMPTY else self._EMPTY[f])
         doc.description = (data.get("description") or "").strip()
         doc.ref_no = (data.get("ref_no") or "").strip()[:100]
+        self._apply_currency(doc, data)
+
+    # documents whose "amount" (or "paid") is money going in or out of a money account
+    FX_MONEY_TYPES = {"CONTRIBUTION": "amount", "EXPENSE": "amount", "ASSET_PURCHASE": "amount",
+                      "ASSET_DISPOSAL": "amount", "RECEIPT": "amount", "DISTRIBUTION": "amount",
+                      "SUPPLIER_PAYMENT": "amount", "PURCHASE": "paid"}
+
+    def account_currency(self, mid) -> str:
+        ma = self.s.get(MoneyAccount, mid) if mid else None
+        return (ma.currency or "") if ma else ""
+
+    def _apply_currency(self, doc: Document, data: dict):
+        """Dollars: what was typed (in the account's / invoice's currency) is kept in fx_amount and the
+        shekel value (x rate) goes in amount, so everything else in the books stays in shekels."""
+        doc.currency, doc.fx_amount, doc.fx_amount2, doc.rate = "", 0, 0, 0
+        t = doc.doc_type
+
+        def rate():
+            r = data.get("rate")
+            if not isinstance(r, int) or r <= 0:
+                raise BusinessError("err_rate_required")
+            return r
+
+        r = data.get("rate")
+        if isinstance(r, int) and r > 0 and self.user is not None:
+            row = self.s.get(Setting, "usd_rate")  # remembered as the default for the next dollar entry
+            if row:
+                row.value = str(r)
+            else:
+                self.s.add(Setting(key="usd_rate", value=str(r)))
+        if t == "INVOICE":
+            c = data.get("currency") or ""
+            if c not in ("", "USD"):
+                raise BusinessError("err_invalid_choice")
+            if c:
+                doc.currency, doc.rate = "USD", rate()  # fx_amount / amount are set in _validate
+            return
+        if t == "TRANSFER":
+            c1, c2 = self.account_currency(doc.money_account_id), self.account_currency(doc.money_account2_id)
+            if not (c1 or c2):
+                return
+            if doc.fee:
+                raise BusinessError("err_fx_no_fee")
+            doc.currency = "USD"
+            if c1 and c2:
+                doc.rate = rate()
+                doc.fx_amount = doc.fx_amount2 = doc.amount
+                doc.amount = convert(doc.fx_amount, doc.rate)
+                return
+            amount2 = data.get("amount2")
+            if not isinstance(amount2, int) or amount2 <= 0:
+                raise BusinessError("err_amount2_required")
+            if not isinstance(doc.amount, int) or doc.amount <= 0:
+                raise BusinessError("err_amount_positive")
+            if c1:  # dollars out, shekels in: the shekels received are the value
+                doc.fx_amount, doc.amount = doc.amount, amount2
+                doc.rate = round_half_up_div(amount2 * 10_000, doc.fx_amount)
+            else:  # shekels out, dollars in
+                doc.fx_amount2 = amount2
+                doc.rate = round_half_up_div(doc.amount * 10_000, amount2)
+            return
+        field = self.FX_MONEY_TYPES.get(t)
+        if field and doc.money_account_id and self.account_currency(doc.money_account_id) == "USD":
+            fx = getattr(doc, field) or 0
+            if not fx:
+                return
+            if t == "RECEIPT" and doc.fee:
+                raise BusinessError("err_fx_no_fee")
+            doc.currency, doc.rate, doc.fx_amount = "USD", rate(), fx
+            setattr(doc, field, convert(fx, doc.rate))
 
     def _active_ref(self, model, obj_id, old_id, err):
         if obj_id is None:
@@ -1095,7 +1213,10 @@ class Ledger:
             project(doc.project_id, required=True)
             positive(doc.quantity, "err_quantity_positive")
             positive(doc.unit_price, "err_price_positive")
-            doc.amount = line_total(doc.quantity, doc.unit_price)
+            doc.amount = line_total(doc.quantity, doc.unit_price)  # in the invoice currency
+            if doc.currency == "USD":
+                doc.fx_amount = doc.amount
+                doc.amount = convert(doc.fx_amount, doc.rate)
             positive(doc.amount)
         elif t == "RECEIPT":
             customer(doc.customer_id)
@@ -1106,6 +1227,12 @@ class Ledger:
                 raise BusinessError("err_number_negative")
             if doc.fee >= doc.amount:
                 raise BusinessError("err_fee_too_large")
+            # a dollar debt is settled into a dollar account, a shekel debt into a shekel account
+            cur = doc.currency
+            due = self.customer_due(doc.customer_id, doc.date, cur, exclude_doc_id=doc.id)
+            other = self.customer_due(doc.customer_id, doc.date, "" if cur else "USD", exclude_doc_id=doc.id)
+            if due <= 0 < other:
+                raise BusinessError("err_receipt_currency_usd" if not cur else "err_receipt_currency_ils")
         elif t == "TRANSFER":
             money(doc.money_account_id)
             money(doc.money_account2_id, "money_account2_id")
@@ -1168,6 +1295,73 @@ class Ledger:
     # ---------------------------------------------------------------- lines
 
     def _lines_for(self, doc: Document) -> list[Line]:
+        L = self._lines_for_shekels(doc)
+        if doc.currency == "USD" or doc.doc_type == "OPENING":
+            L = self._fx_lines(doc, L)
+        return L
+
+    def _fx_carrying(self, account: str, key: str, key_id: int, date: dt.date, fx_out: int,
+                     exclude_doc_id: int | None) -> int:
+        """Shekel value of ``fx_out`` dollars taken from a dollar balance (average of what is held)."""
+        col = getattr(JournalLine, key)
+        ils, fx = self.s.execute(
+            select(func.coalesce(func.sum(JournalLine.debit - JournalLine.credit), 0),
+                   func.coalesce(func.sum(JournalLine.fx), 0))
+            .where(JournalLine.account == account, col == key_id, JournalLine.currency == "USD",
+                   JournalLine.date <= date, JournalLine.document_id != (exclude_doc_id or 0))).one()
+        ils, fx = int(ils), int(fx)
+        if fx <= 0:
+            return None
+        if fx_out >= fx:
+            return ils
+        return round_half_up_div(ils * fx_out, fx)
+
+    def _fx_lines(self, doc: Document, L: list[Line]) -> list[Line]:
+        """Tag dollar cash / receivable lines with their dollars. Dollars leaving a dollar balance leave at
+        the shekel value they were held at; the difference to today's value is an exchange gain or loss."""
+        out: list[Line] = []
+        diff = 0
+        moved_value = None
+        for x in L:
+            if x.account == CASH and self.account_currency(x.money_account_id) == "USD":
+                x.currency = "USD"
+                if doc.doc_type == "OPENING":
+                    o = next((o for o in doc.opening_lines if o.kind == "money"
+                              and o.money_account_id == x.money_account_id), None)
+                    x.fx = o.fx if o else 0
+                elif x.debit:
+                    x.fx = doc.fx_amount2 if doc.doc_type == "TRANSFER" else doc.fx_amount
+                else:
+                    x.fx = -doc.fx_amount
+                    held = self._fx_carrying(CASH, "money_account_id", x.money_account_id, doc.date,
+                                             doc.fx_amount, doc.id)
+                    if held is not None:
+                        if doc.doc_type == "TRANSFER" and self.account_currency(doc.money_account2_id) == "USD":
+                            moved_value = held
+                        else:
+                            diff += x.credit - held
+                        x.credit = held
+            elif x.account == AR and doc.currency == "USD" and doc.doc_type in ("INVOICE", "RECEIPT"):
+                x.currency = "USD"
+                if x.debit:
+                    x.fx = doc.fx_amount
+                else:
+                    x.fx = -doc.fx_amount
+                    held = self._fx_carrying(AR, "customer_id", x.customer_id, doc.date, doc.fx_amount, doc.id)
+                    if held is not None:
+                        diff += x.credit - held
+                        x.credit = held
+            out.append(x)
+        if moved_value is not None:
+            # dollar -> dollar transfer: no gain or loss, the value just moves
+            next(x for x in out if x.account == CASH and x.debit).debit = moved_value
+        if diff > 0:
+            out.append(Line(GAIN, credit=diff, project_id=doc.project_id, category="fx"))
+        elif diff < 0:
+            out.append(Line(LOSS, debit=-diff, project_id=doc.project_id, category="fx"))
+        return out
+
+    def _lines_for_shekels(self, doc: Document) -> list[Line]:
         t = doc.doc_type
         L: list[Line] = []
         if t == "OPENING":
@@ -1350,7 +1544,8 @@ class Ledger:
                                          partner_id=x.partner_id, project_id=x.project_id,
                                          customer_id=x.customer_id, money_account_id=x.money_account_id,
                                          asset_id=x.asset_id, category=x.category, item_id=x.item_id,
-                                         supplier_id=x.supplier_id, quantity=x.quantity))
+                                         supplier_id=x.supplier_id, quantity=x.quantity,
+                                         currency=x.currency, fx=x.fx))
         self.s.flush()
 
     def _rebuild_call_shares(self, doc: Document):
@@ -1522,17 +1717,22 @@ class Ledger:
     # ---------------------------------------------------------------- invariants
 
     def _running_check(self, account: str, key: str, err: str):
+        """No balance below zero on any day. Dollar balances (cash, receivables) are checked in dollars:
+        their shekel value moves with the rate and says nothing about having the money."""
         col = getattr(JournalLine, key)
         rows = self.s.execute(
-            select(col, JournalLine.date, func.sum(JournalLine.debit - JournalLine.credit))
-            .where(JournalLine.account == account).group_by(col, JournalLine.date)
-            .order_by(col, JournalLine.date)).all()
+            select(col, JournalLine.currency, JournalLine.date, func.sum(JournalLine.debit - JournalLine.credit),
+                   func.sum(JournalLine.fx))
+            .where(JournalLine.account == account).group_by(col, JournalLine.currency, JournalLine.date)
+            .order_by(col, JournalLine.currency, JournalLine.date)).all()
         running: dict = defaultdict(int)
         sign = 1 if account in (CASH, AR, FA, INV) else -1
-        for k, d, amount in rows:
-            running[k] += sign * int(amount)
-            if running[k] < 0:
-                raise BusinessError(err, id=k, date=d.isoformat(), balance=running[k], excess=-running[k])
+        for k, cur, d, amount, fx in rows:
+            running[(k, cur)] += sign * int(fx if cur == "USD" else amount)
+            if running[(k, cur)] < 0:
+                v = running[(k, cur)]
+                raise BusinessError(err + ("_usd" if cur == "USD" else ""), id=k, date=d.isoformat(),
+                                    balance=v, excess=-v)
 
     def check_invariants(self):
         """Raise BusinessError if the books are in an impossible state."""
@@ -1880,7 +2080,8 @@ class Ledger:
     # ---------------------------------------------------------------- opening
 
     def save_opening(self, date: dt.date, money: dict[int, int], customers: dict[int, int],
-                     assets: list[dict], partners: dict[int, int]) -> Document:
+                     assets: list[dict], partners: dict[int, int], money_fx: dict[int, int] | None = None,
+                     rate: int = 0) -> Document:
         """Create or replace the opening balances.
 
         ``assets`` items: {"id": existing asset id or None, "name", "amount", "project_id"}.
@@ -1907,6 +2108,17 @@ class Ledger:
         for mid, amt in money.items():
             if amt and self.s.get(MoneyAccount, mid) is None:
                 raise BusinessError("err_not_found")
+        # dollar accounts: opening balance typed in dollars, valued at the opening rate
+        money = dict(money)
+        money_fx = {k: v for k, v in (money_fx or {}).items() if v}
+        for mid, fx in money_fx.items():
+            if not isinstance(fx, int) or fx < 0:
+                raise BusinessError("err_number_negative")
+            if self.account_currency(mid) != "USD":
+                raise BusinessError("err_invalid_choice")
+            if not isinstance(rate, int) or rate <= 0:
+                raise BusinessError("err_rate_required")
+            money[mid] = convert(fx, rate)
         for cid, amt in customers.items():
             if amt and self.s.get(Customer, cid) is None:
                 raise BusinessError("err_not_found")
@@ -1932,6 +2144,7 @@ class Ledger:
         old_date = doc.date
         doc.date = date
         doc.amount = debit
+        doc.rate = rate if money_fx else 0
         doc.updated_at = utcnow()
         old_asset_ids = {o.asset_id for o in doc.opening_lines if o.kind == "asset"}
         for ln in list(doc.lines):
@@ -1942,7 +2155,8 @@ class Ledger:
         kept_assets = set()
         for mid, amt in sorted(money.items()):
             if amt:
-                doc.opening_lines.append(OpeningLine(kind="money", money_account_id=mid, amount=amt))
+                doc.opening_lines.append(OpeningLine(kind="money", money_account_id=mid, amount=amt,
+                                                     fx=money_fx.get(mid, 0)))
         for cid, amt in sorted(customers.items()):
             if amt:
                 doc.opening_lines.append(OpeningLine(kind="customer", customer_id=cid, amount=amt))
@@ -2214,9 +2428,12 @@ class Ledger:
             q = q.where(JournalLine.date <= end)
         q = q.order_by(JournalLine.date, Document.id, JournalLine.id)
         rows, running = [], opening
+        fx_run = self.fx_balance(ma_id, start - dt.timedelta(days=1)) if start else 0
         for jl, doc in self.s.execute(q).all():
             running += jl.debit - jl.credit
-            rows.append({"line": jl, "doc": doc, "in": jl.debit, "out": jl.credit, "balance": running})
+            fx_run += jl.fx
+            rows.append({"line": jl, "doc": doc, "in": jl.debit, "out": jl.credit, "balance": running,
+                         "fx_in": max(jl.fx, 0), "fx_out": max(-jl.fx, 0), "fx_balance": fx_run})
         return opening, rows, running
 
     def project_report(self, start: dt.date | None, end: dt.date | None) -> list[dict]:

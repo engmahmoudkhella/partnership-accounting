@@ -7,6 +7,8 @@
 {% if kind == 'quote' %}{% set title = t('cm_quote') %}{% set no = quote.number %}{% set ddate = quote.date %}
 {% elif kind == 'invoice' %}{% set title = t('cm_invoice') %}{% set no = doc.number %}{% set ddate = doc.date %}
 {% else %}{% set title = t('cm_claim') %}{% set no = none %}{% set ddate = as_of %}{% endif %}
+{% macro amt(v) %}{% if cur == 'USD' %}{{ usd(v) }}{% else %}{{ money(v) }}{% endif %}{% endmacro %}
+{% macro amtc(v) %}{% if cur == 'USD' %}{{ usd(v) }}{% else %}{{ money(v) }} ₪{% endif %}{% endmacro %}
 <title>{{ title }}{% if no %} {{ no }}{% endif %} · {{ co }}</title>
 <style>
   @page{size:A4;margin:12mm}
@@ -67,6 +69,7 @@
       <a href="/quotes/{{ quote.id }}/edit" data-testid="quote-edit">{{ t('btn_edit') }}</a>
       <form method="post" action="/quotes/{{ quote.id }}/accept" onsubmit="return confirm({{ t('confirm_accept_quote')|tojson }})"><input type="hidden" name="csrf" value="{{ csrf }}">
         <input type="date" name="date" value="{{ today.isoformat() }}" aria-label="{{ t('f_date') }}" data-testid="accept-date">
+        {% if quote.currency == 'USD' %}<label>{{ t('f_rate') }} <input name="rate" value="{{ usd_rate }}" size="6" dir="ltr" required placeholder="3.65" data-testid="accept-rate"></label>{% endif %}
         <button class="primary" data-testid="quote-accept">{{ t('btn_accept_quote') }}</button></form>
       <form method="post" action="/quotes/{{ quote.id }}/cancel" onsubmit="return confirm({{ t('confirm_cancel_quote')|tojson }})"><input type="hidden" name="csrf" value="{{ csrf }}"><button>{{ t('btn_cancel_quote') }}</button></form>
     {% endif %}
@@ -80,6 +83,7 @@
   {% else %}
     <form method="get"><label>{{ t('claim_as_of') }} <input type="date" name="date" value="{{ as_of.isoformat() }}"></label>
       <label><input type="checkbox" name="all" value="1" {{ 'checked' if show_all }}> {{ t('claim_show_paid') }}</label>
+      {% if currencies|length > 1 %}<select name="cur"><option value="" {{ 'selected' if cur == '' }}>{{ t('cur_ILS') }}</option><option value="USD" {{ 'selected' if cur == 'USD' }}>{{ t('cur_USD') }}</option></select>{% else %}<input type="hidden" name="cur" value="{{ cur }}">{% endif %}
       <button>{{ t('btn_show') }}</button></form>
     <a href="/reports/customer/{{ customer.id }}">{{ t('rep_customer') }}</a>
   {% endif %}
@@ -122,13 +126,13 @@
 
   {% if kind in ('quote', 'invoice') %}
   {% if kind == 'quote' %}<div class="letter"><p>{{ t('quote_intro') }}</p></div>{% endif %}
-  <table data-testid="cm-lines"><thead><tr><th class="c">#</th><th>{{ t('cm_item') }}</th><th class="n">{{ t('f_quantity') }}</th><th class="n">{{ t('f_unit_price') }}</th><th class="n">{{ t('f_line_total') }}</th></tr></thead>
-  <tbody>{% for r in rows %}<tr><td class="c">{{ num(loop.index) }}</td><td>{{ r.description }}</td><td class="n"><span class="num">{{ qty(r.quantity) }}</span></td><td class="n"><span class="num">{{ money(r.unit_price) }}</span></td><td class="n"><span class="num">{{ money(r.amount) }}</span></td></tr>{% endfor %}</tbody>
+  <table data-testid="cm-lines"><thead><tr><th class="c">#</th><th>{{ t('cm_item') }}</th><th class="n">{{ t('f_quantity') }}</th><th class="n">{{ t('cm_unit_price') }}{% if cur == 'USD' %} ($){% else %} (₪){% endif %}</th><th class="n">{{ t('f_line_total') }}</th></tr></thead>
+  <tbody>{% for r in rows %}<tr><td class="c">{{ num(loop.index) }}</td><td>{{ r.description }}</td><td class="n"><span class="num">{{ qty(r.quantity) }}</span></td><td class="n"><span class="num">{{ amt(r.unit_price) }}</span></td><td class="n"><span class="num">{{ amt(r.amount) }}</span></td></tr>{% endfor %}</tbody>
   <tfoot>
-    <tr class="grand"><td colspan="4">{{ t('cm_total') }}</td><td class="n"><span class="num" data-testid="cm-total">{{ money(total) }} ₪</span></td></tr>
+    <tr class="grand"><td colspan="4">{{ t('cm_total') }}</td><td class="n"><span class="num" data-testid="cm-total">{{ amtc(total) }}</span></td></tr>
     {% if kind == 'invoice' and doc.status == 'POSTED' and paid %}
-    <tr><td colspan="4">{{ t('cm_paid') }}</td><td class="n"><span class="num">{{ money(paid) }}</span></td></tr>
-    <tr><td colspan="4">{{ t('cm_remaining') }}</td><td class="n"><span class="num" data-testid="cm-remaining">{{ money(total - paid) }}</span></td></tr>
+    <tr><td colspan="4">{{ t('cm_paid') }}</td><td class="n"><span class="num">{{ amt(paid) }}</span></td></tr>
+    <tr><td colspan="4">{{ t('cm_remaining') }}</td><td class="n"><span class="num" data-testid="cm-remaining">{{ amt(total - paid) }}</span></td></tr>
     {% endif %}
   </tfoot></table>
   <div class="words"><b>{{ t('cm_in_words') }}:</b><span data-testid="cm-words">{{ words }}</span></div>
@@ -146,12 +150,12 @@
     <td class="c">{{ num(loop.index) }}</td><td><span class="num">{{ fdate(r.date) }}</span></td>
     <td>{% if d.doc_type == 'INVOICE' %}INV-{{ d.number }}{% else %}{{ t('doc_' + d.doc_type) }}{% endif %}</td>
     <td>{{ d.description or (names.project.get(d.project_id, '') if d.project_id else '') }}</td>
-    <td class="n"><span class="num">{{ money(r.amount) }}</span></td><td class="n"><span class="num">{{ money(r.paid) }}</span></td><td class="n"><span class="num">{{ money(r.remaining) }}</span></td></tr>
+    <td class="n"><span class="num">{{ amt(r.amount) }}</span></td><td class="n"><span class="num">{{ amt(r.paid) }}</span></td><td class="n"><span class="num">{{ amt(r.remaining) }}</span></td></tr>
   {% else %}<tr><td colspan="7">{{ t('claim_nothing_due') }}</td></tr>{% endfor %}</tbody>
   <tfoot>
-    <tr><td colspan="4">{{ t('claim_total_invoiced') }}</td><td class="n" colspan="3"><span class="num">{{ money(claim.invoiced) }}</span></td></tr>
-    <tr><td colspan="4">{{ t('claim_total_paid') }}</td><td class="n" colspan="3"><span class="num">{{ money(claim.paid) }}</span></td></tr>
-    <tr class="grand"><td colspan="4">{{ t('claim_total_due') }}</td><td class="n" colspan="3"><span class="num" data-testid="cm-total">{{ money(claim.balance) }} ₪</span></td></tr>
+    <tr><td colspan="4">{{ t('claim_total_invoiced') }}</td><td class="n" colspan="3"><span class="num">{{ amt(claim.invoiced) }}</span></td></tr>
+    <tr><td colspan="4">{{ t('claim_total_paid') }}</td><td class="n" colspan="3"><span class="num">{{ amt(claim.paid) }}</span></td></tr>
+    <tr class="grand"><td colspan="4">{{ t('claim_total_due') }}</td><td class="n" colspan="3"><span class="num" data-testid="cm-total">{{ amtc(claim.balance) }}</span></td></tr>
   </tfoot></table>
   {% if claim.balance > 0 %}<div class="words"><b>{{ t('cm_in_words') }}:</b><span data-testid="cm-words">{{ words }}</span></div>
   <div class="letter section"><p>{{ t('claim_request') }}</p></div>{% endif %}

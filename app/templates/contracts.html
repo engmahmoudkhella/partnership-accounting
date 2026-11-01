@@ -9,12 +9,12 @@
 {% for r in rows %}{% set c = r.c %}<tr class="{{ 'inactive' if not c.active }}">
 <td><a href="/documents?q={{ c.name|urlencode }}">{{ c.name }}</a><br><small class="muted">{% if c.kind == 'income' %}{{ names.customer.get(c.customer_id, '') }}{% else %}{{ t('cat_' + c.category) }}{% if c.paid_by_partner_id %} · {{ t('pay_by_partner') }}: {{ names.partner.get(c.paid_by_partner_id, '') }}{% elif c.money_account_id %} · {{ names.money_account.get(c.money_account_id, '') }}{% endif %}{% endif %}{% if c.project_id %} · {{ names.project.get(c.project_id, '') }}{% endif %}</small></td>
 <td>{{ t('ck_short_' + c.kind) }}</td>
-<td class="n">{{ m(c.amount) }}</td>
+<td class="n">{% if c.currency == 'USD' %}<span class="num" dir="ltr">{{ usd(c.amount) }}</span>{% else %}{{ m(c.amount) }}{% endif %}</td>
 <td class="nowrap"><span class="num" dir="ltr">{{ fdate(c.start_date) }}</span><br><small class="muted">{{ t('to') }} <span class="num" dir="ltr">{{ fdate(r.end) }}</span></small></td>
 <td data-testid="contract-progress-{{ c.id }}"><span class="num nowrap" dir="ltr">{{ num(r.done) }} / {{ num(c.months) }}</span></td>
 <td class="nowrap">{% if r.next %}<span class="num" dir="ltr">{{ fdate(r.next) }}</span>{% elif r.done >= c.months %}<span class="ok">{{ t('contract_done') }}</span>{% else %}<span class="muted">{{ t('contract_stopped') }}</span>{% endif %}
 {% if r.error and c.active %}<div class="field-error" role="alert">{{ t('contract_waiting') }} {{ r.error }}</div>{% endif %}</td>
-<td class="n">{{ m(r.total) }}</td>
+<td class="n">{% if c.currency == 'USD' %}<span class="num" dir="ltr">{{ usd(r.total) }}</span>{% else %}{{ m(r.total) }}{% endif %}</td>
 <td>{% if user.role in ('admin','accountant') %}
 {% if c.active and r.done < c.months %}<form method="post" action="/contracts/{{ c.id }}/stop" class="inline confirm" data-confirm="{{ t('confirm_stop_contract') }}">{{ csrf_field() }}<button class="small">{{ t('btn_stop') }}</button></form>{% endif %}
 {% if r.done == 0 %}<form method="post" action="/contracts/{{ c.id }}/delete" class="inline confirm" data-confirm="{{ t('confirm_delete') }}">{{ csrf_field() }}<button class="danger small">{{ t('btn_delete') }}</button></form>{% endif %}
@@ -34,6 +34,7 @@
 <label>{{ t('f_months') }} *<input type="text" inputmode="numeric" name="months" value="12" dir="ltr" data-testid="c-months"></label>
 <label>{{ t('f_project_id') }}<select name="project_id" data-testid="c-project"><option value="">—</option>{% for o in opts.project %}<option value="{{ o.id }}">{{ o.name }}</option>{% endfor %}</select></label>
 <div class="ck-income">
+<label>{{ t('f_currency') }}<select name="currency" data-testid="c-currency"><option value="">{{ t('cur_ILS') }}</option><option value="USD">{{ t('cur_USD') }}</option></select><small class="muted">{{ t('help_contract_usd') }}</small></label>
 <label>{{ t('f_customer_id') }} *<select name="customer_id" data-testid="c-customer"><option value="">—</option>{% for o in opts.customer %}<option value="{{ o.id }}">{{ o.name }}</option>{% endfor %}</select></label>
 </div>
 <div class="ck-expense">

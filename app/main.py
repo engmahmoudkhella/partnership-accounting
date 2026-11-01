@@ -22,7 +22,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import numbers as N
 from . import chart as COA
 from .db import init_db, make_engine, make_sessionmaker
-from .forms import ATTACHMENT_TYPES, FORM_FIELDS, field_label, parse_date, parse_document_form
+from .forms import ATTACHMENT_TYPES, FORM_FIELDS, FX_TYPES, field_label, parse_date, parse_document_form
 from .i18n import tr
 from .models import (
     DOC_TYPES,
@@ -152,6 +152,12 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         def qty(v):
             return N.format_quantity(v or 0, digits)
 
+        def usd(v):
+            return "$" + N.format_money(v or 0, digits)
+
+        def rate(v):
+            return N.format_rate(v or 0, digits)
+
         def pct(v):
             return N.format_percent(v or 0, digits)
 
@@ -166,7 +172,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             return s.translate(str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩")) if digits == "arab" else s
 
         hidden = {"updated_at", "created_at", "voided_at", "id", "number", "doc_type", "attachment", "asset_id",
-                  "created_by"}
+                  "created_by", "currency", "fx_amount", "fx_amount2", "rate"}
 
         def field_name(k):
             key = {"partner_id": "f_partner_id", "partner2_id": "f_receiver_partner",
@@ -203,7 +209,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
 
         ctx_vars = dict(request=req, t=ctx.t, lang=lang, field_name=field_name, field_value=field_value,
                         hidden_fields=hidden, dir="rtl" if lang == "ar" else "ltr", user=ctx.user,
-                        csrf=csrf_token(req), money=money, qty=qty, pct=pct, num=num, fdate=date,
+                        csrf=csrf_token(req), money=money, qty=qty, usd=usd, rate=rate, fx_types=FX_TYPES, pct=pct, num=num, fdate=date,
                         flashes=flashes, today=today_fn(), N=N, field_label=field_label,
                         company=ctx.L.get_setting("company_name", ""),
                         pending_count=_pending_count(ctx), vk=COA.voucher_kind, code_of=COA.code_of)
@@ -447,14 +453,16 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         L = ctx.L
         accounts = list(ctx.s.scalars(select(MoneyAccount).order_by(MoneyAccount.id)))
         balances = [(a, L.balance(CASH, money_account_id=a.id)) for a in accounts]
-        customers = [(c, L.balance("1200", customer_id=c.id)) for c in ctx.s.scalars(select(Customer))]
+        fx_bal = {a.id: L.fx_balance(a.id) for a in accounts if a.currency == "USD"}
+        customers = [(c, L.customer_due(c.id, dt.date.max), L.customer_due(c.id, dt.date.max, "USD"))
+                     for c in ctx.s.scalars(select(Customer))]
         tb = L.trial_balance()
         has_opening = L.opening_doc() is not None
         partners = L.partner_summary() if L.share_versions() else []
         projects = L.project_report(dt.date(today_fn().year, today_fn().month, 1), None) if has_opening else []
         recent = list(ctx.s.scalars(select(Document).order_by(Document.id.desc()).limit(10)))
         dist = L.distributable(today_fn()) if has_opening else 0
-        return render(ctx, "dashboard.html", balances=balances, customers=customers, tb=tb,
+        return render(ctx, "dashboard.html", fx_bal=fx_bal, balances=balances, customers=customers, tb=tb,
                       has_opening=has_opening, partners=partners, projects=projects, recent=recent,
                       distributable=dist, setup_steps=_setup_steps(ctx))
 
@@ -532,6 +540,22 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             elif field != "asset_name":
                 val = getattr(doc, field)
                 v[field] = "" if val is None else str(val)
+        if doc.currency == "USD":  # dollar documents are edited in dollars
+            v["rate"] = N.rate_input_value(doc.rate)
+            t = doc.doc_type
+            if t == "INVOICE":
+                v["currency"] = "USD"
+            elif t == "TRANSFER":
+                from_usd = bool(doc.fx_amount)
+                to_usd = bool(doc.fx_amount2)
+                v["amount"] = N.money_input_value(doc.fx_amount if from_usd else doc.amount)
+                if from_usd != to_usd:
+                    v["amount2"] = N.money_input_value(doc.fx_amount2 if to_usd else doc.amount)
+                    v["rate"] = ""
+            elif t == "PURCHASE":
+                v["paid"] = N.money_input_value(doc.fx_amount)
+            else:
+                v["amount"] = N.money_input_value(doc.fx_amount)
         return v
 
     async def save_upload(ctx: Ctx, form, field="attachment", images_only=False):
@@ -627,6 +651,8 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             extra["share_names"] = {p.id: p.name for p in ctx.s.scalars(select(Partner))}
         if doc_type in ("EXPENSE", "ASSET_PURCHASE", "PURCHASE"):
             extra["threshold"] = ctx.L.approval_threshold
+        if doc_type in FX_TYPES:
+            extra["usd_rate"] = N.rate_input_value(ctx.L.usd_rate())
         if doc_type == "SUPPLIER_PAYMENT":
             extra["supplier_debts"] = {sp.id: ctx.L.supplier_owed(sp.id) for sp in ctx.s.scalars(select(Supplier))}
         if doc_type in ("STOCK_ISSUE", "PRODUCTION", "STOCK_COUNT", "STOCK_RETURN"):
@@ -702,7 +728,9 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         asset = ctx.s.get(Asset, doc.asset_id) if doc.asset_id else None
         cash_amount = doc.amount - (doc.fee or 0) if doc.doc_type == "RECEIPT" else doc.amount
         return render(ctx, "print_voucher.html", doc=doc, names=_names(ctx), coa=coa_names(ctx), asset=asset,
-                      kind=COA.voucher_kind(doc), words=N.amount_in_words(doc.amount, ctx.lang),
+                      kind=COA.voucher_kind(doc),
+                      words=(N.amount_in_words(doc.fx_amount, ctx.lang, "USD") if doc.currency == "USD" and doc.fx_amount
+                             else N.amount_in_words(doc.amount, ctx.lang)),
                       cash_amount=cash_amount, now=dt.datetime.now().strftime("%Y-%m-%d %H:%M"))
 
     @app.get("/documents/{doc_id:int}/edit", response_class=HTMLResponse)
@@ -813,14 +841,15 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     async def opening_page(ctx: Ctx):
         require(ctx)
         doc = ctx.L.opening_doc()
-        values = {"date": (doc.date if doc else today_fn()).isoformat()}
+        values = {"date": (doc.date if doc else today_fn()).isoformat(),
+                  "opening_rate": N.rate_input_value(doc.rate if doc and doc.rate else ctx.L.usd_rate())}
         assets = []
         if doc:
             for o in doc.opening_lines:
                 key = {"money": "m", "customer": "c", "partner": "p"}.get(o.kind)
                 if key:
                     ref = {"m": o.money_account_id, "c": o.customer_id, "p": o.partner_id}[key]
-                    values[f"{key}_{ref}"] = N.money_input_value(o.amount)
+                    values[f"{key}_{ref}"] = N.money_input_value(o.fx if o.fx else o.amount)
                 else:
                     a = ctx.s.get(Asset, o.asset_id)
                     assets.append({"id": a.id, "name": a.name, "amount": N.money_input_value(o.amount),
@@ -860,7 +889,14 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
                     errors[f"{prefix}_{it.id}"] = err_text(ctx, e)
             return out
 
-        money = amounts("m", lists["accounts"])
+        money = amounts("m", [a for a in lists["accounts"] if a.currency != "USD"])
+        money_fx = amounts("m", [a for a in lists["accounts"] if a.currency == "USD"])
+        rate = 0
+        if any(money_fx.values()):
+            try:
+                rate = N.parse_rate(form.get("opening_rate", ""))
+            except N.NumberError as e:
+                errors["opening_rate"] = err_text(ctx, e)
         customers = amounts("c", lists["customers"])
         partners = amounts("p", lists["partners"])
         assets, asset_rows = [], []
@@ -883,7 +919,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             n += 1
         if not errors:
             try:
-                ctx.L.save_opening(date, money, customers, assets, partners)
+                ctx.L.save_opening(date, money, customers, assets, partners, money_fx=money_fx, rate=rate)
                 ctx.s.commit()
                 ctx.L.remove_scheduled_files()
                 flash(ctx.request, "ok", ctx.t("msg_saved"))
@@ -1032,7 +1068,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             if quote is not None:
                 values = {"date": quote.date.isoformat(), "valid_until": quote.valid_until.isoformat() if quote.valid_until else "",
                           "customer_id": str(quote.customer_id), "project_id": str(quote.project_id or ""),
-                          "notes": quote.notes}
+                          "notes": quote.notes, "currency": quote.currency or ""}
                 rows = [{"desc": ln.description, "qty": N.qty_input_value(ln.quantity),
                          "price": N.money_input_value(ln.unit_price)} for ln in quote.lines]
             else:
@@ -1081,10 +1117,10 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             quote = ctx.L.save_quote(
                 quote, date=parse_date(form.get("date", "")), valid_until=opt_date(form.get("valid_until")),
                 customer_id=safe_id(form.get("customer_id")), project_id=safe_id(form.get("project_id")),
-                notes=form.get("notes", ""), lines=lines)
+                notes=form.get("notes", ""), lines=lines, currency="USD" if form.get("currency") == "USD" else "")
         except (BusinessError, N.NumberError) as e:
             ctx.s.rollback()
-            values = {k: form.get(k, "") for k in ("date", "valid_until", "customer_id", "project_id", "notes")}
+            values = {k: form.get(k, "") for k in ("date", "valid_until", "customer_id", "project_id", "notes", "currency")}
             values["_rows"] = rows
             flash(ctx.request, "error", err_text(ctx, e))
             return _quote_form(ctx, quote if qid else None, values)
@@ -1099,8 +1135,9 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         rows = [{"description": ln.description, "quantity": ln.quantity, "unit_price": ln.unit_price,
                  "amount": ln.amount} for ln in quote.lines]
         invoices = [ctx.s.get(Document, i) for i in (quote.invoice_ids or [])]
-        return render_commercial(ctx, "quote", quote=quote, rows=rows, total=quote.total,
-                                 words=N.amount_in_words(quote.total, ctx.lang),
+        return render_commercial(ctx, "quote", quote=quote, rows=rows, total=quote.total, cur=quote.currency or "",
+                                 words=N.amount_in_words(quote.total, ctx.lang, quote.currency or ""),
+                                 usd_rate=N.rate_input_value(ctx.L.usd_rate()),
                                  invoices=[d for d in invoices if d is not None])
 
     @app.post("/quotes/{qid:int}/accept")
@@ -1109,7 +1146,8 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         require(ctx, "admin", "accountant")
         quote = get_or_404(ctx, Quote, qid)
         d = opt_date(form.get("date")) or today_fn()
-        docs = ctx.L.accept_quote(quote, d)
+        raw = (form.get("rate") or "").strip()
+        docs = ctx.L.accept_quote(quote, d, N.parse_rate(raw) if raw else None)
         flash(ctx.request, "ok", ctx.t("msg_quote_accepted", n=len(docs)))
         raise_commit_redirect(ctx, f"/documents/{docs[0].id}/invoice" if len(docs) == 1 else f"/quotes/{qid}")
 
@@ -1136,14 +1174,16 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         doc = get_or_404(ctx, Document, doc_id)
         if doc.doc_type != "INVOICE":
             raise BusinessError("err_not_found")
+        cur = doc.currency or ""
+        total = doc.fx_amount if cur == "USD" else doc.amount
         rows = [{"description": doc.description or ctx.t("doc_INVOICE"), "quantity": doc.quantity,
-                 "unit_price": doc.unit_price, "amount": doc.amount}]
-        claim = ctx.L.customer_claim(doc.customer_id, dt.date.max) if doc.status == "POSTED" else None
+                 "unit_price": doc.unit_price, "amount": total}]
+        claim = ctx.L.customer_claim(doc.customer_id, dt.date.max, cur) if doc.status == "POSTED" else None
         paid = 0
         if claim:
             paid = next((r["paid"] for r in claim["dues"] if r["doc"].id == doc.id), 0)
-        return render_commercial(ctx, "invoice", doc=doc, rows=rows, total=doc.amount, paid=paid,
-                                 words=N.amount_in_words(doc.amount, ctx.lang))
+        return render_commercial(ctx, "invoice", doc=doc, rows=rows, total=total, paid=paid, cur=cur,
+                                 words=N.amount_in_words(total, ctx.lang, cur))
 
     @app.get("/reports/customer/{cid:int}/claim", response_class=HTMLResponse)
     @page
@@ -1151,10 +1191,15 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         require(ctx)
         c = get_or_404(ctx, Customer, cid)
         as_of = opt_date(ctx.request.query_params.get("date")) or today_fn()
-        claim = ctx.L.customer_claim(cid, as_of)
+        currencies = ctx.L.customer_currencies(cid)
+        cur = ctx.request.query_params.get("cur")
+        if cur not in ("", "USD"):
+            cur = "USD" if "USD" in currencies else ""
+        claim = ctx.L.customer_claim(cid, as_of, cur)
         show_all = ctx.request.query_params.get("all") == "1"
-        return render_commercial(ctx, "claim", customer=c, as_of=as_of, claim=claim, show_all=show_all,
-                                 total=claim["balance"], words=N.amount_in_words(max(claim["balance"], 0), ctx.lang))
+        return render_commercial(ctx, "claim", customer=c, as_of=as_of, claim=claim, show_all=show_all, cur=cur,
+                                 currencies=currencies, total=claim["balance"],
+                                 words=N.amount_in_words(max(claim["balance"], 0), ctx.lang, cur))
 
     # ------------------------------------------------------------ monthly contracts
 
@@ -1209,7 +1254,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             category=form.get("category", "rent"),
             money_account_id=safe_id(form.get("money_account_id")) if pay == "account" else None,
             paid_by_partner_id=safe_id(form.get("paid_by_partner_id")) if pay == "partner" else None,
-            supplier=form.get("supplier", ""))
+            supplier=form.get("supplier", ""), currency="USD" if form.get("currency") == "USD" else "")
         made = ctx.L.run_contracts()
         flash(ctx.request, "ok", ctx.t("msg_contract_saved", made=made))
         raise_commit_redirect(ctx, "/contracts")
@@ -1293,11 +1338,13 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         model = MASTER[entity]
         items = list(ctx.s.scalars(select(model).order_by(model.active.desc(), model.id)))
         refs = {i.id: ctx.L.master_references(entity, i.id) for i in items}
-        bal = {}
+        bal, fxbal = {}, {}
         if entity == "money_account":
             bal = {i.id: ctx.L.balance(CASH, money_account_id=i.id) for i in items}
+            fxbal = {i.id: ctx.L.fx_balance(i.id) for i in items if i.currency == "USD"}
         if entity == "customer":
-            bal = {i.id: ctx.L.balance("1200", customer_id=i.id) for i in items}
+            bal = {i.id: ctx.L.customer_due(i.id, dt.date.max) for i in items}
+            fxbal = {i.id: ctx.L.customer_due(i.id, dt.date.max, "USD") for i in items}
         if entity == "supplier":
             bal = {i.id: ctx.L.supplier_owed(i.id) for i in items}
         if entity == "item":
@@ -1305,7 +1352,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         edit = None
         if safe_id(ctx.request.query_params.get("edit")):
             edit = ctx.s.get(model, safe_id(ctx.request.query_params["edit"]))
-        return render(ctx, "master.html", entity=entity, items=items, refs=refs, bal=bal, edit=edit,
+        return render(ctx, "master.html", entity=entity, items=items, refs=refs, bal=bal, fxbal=fxbal, edit=edit,
                       categories=EXPENSE_CATEGORIES)
 
     @app.post("/master/{entity}/save")
@@ -1318,7 +1365,8 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         obj = get_or_404(ctx, MASTER[entity], N.parse_id(oid)) if N.parse_id(oid) else None
         fields = {"name": form.get("name", "")}
         if entity == "money_account":
-            fields.update(kind=form.get("kind", ""), holder=form.get("holder", ""))
+            fields.update(kind=form.get("kind", ""), holder=form.get("holder", ""),
+                          currency="USD" if form.get("currency") == "USD" else "")
         if entity == "project":
             fields.update(kind=form.get("kind", ""), unit_name=form.get("unit_name", ""), notes=form.get("notes", ""))
             for k in ("sale_price", "packaging_per_unit", "labor_per_unit", "other_per_unit"):
@@ -1584,7 +1632,9 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         q = ctx.request.query_params
         d1, d2 = opt_date(q.get("from")), opt_date(q.get("to"))
         opening, rows, closing = ctx.L.money_account_ledger(ma_id, d1, d2)
-        return render(ctx, "report_cash.html", ma=ma, opening=opening, rows=rows, closing=closing, d1=d1, d2=d2)
+        fx_open = ctx.L.fx_balance(ma_id, d1 - dt.timedelta(days=1)) if d1 else 0
+        return render(ctx, "report_cash.html", ma=ma, opening=opening, rows=rows, closing=closing, d1=d1, d2=d2,
+                      fx_open=fx_open, fx_close=rows[-1]["fx_balance"] if rows else fx_open)
 
     @app.get("/reports/customer/{cid:int}", response_class=HTMLResponse)
     @page
@@ -1594,7 +1644,8 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         lines = ctx.s.execute(select(JournalLine, Document).join(Document, Document.id == JournalLine.document_id)
                               .where(JournalLine.account == "1200", JournalLine.customer_id == cid)
                               .order_by(JournalLine.date, Document.id)).all()
-        return render(ctx, "report_customer.html", c=c, lines=lines)
+        return render(ctx, "report_customer.html", c=c, lines=lines, fx_due=ctx.L.customer_due(cid, dt.date.max, "USD"),
+                      ils_due=ctx.L.customer_due(cid, dt.date.max))
 
     @app.get("/assets", response_class=HTMLResponse)
     @page

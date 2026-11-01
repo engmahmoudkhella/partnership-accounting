@@ -52,7 +52,7 @@
   </div>
 
   {% if kind in ('receipt', 'payment') %}
-  <div class="row"><span class="k">{{ t('the_sum_of') }}</span><span class="amount-box num" data-testid="voucher-amount">{{ money(doc.amount) }} ₪</span></div>
+  <div class="row"><span class="k">{{ t('the_sum_of') }}</span><span class="amount-box num" data-testid="voucher-amount">{% if doc.currency == 'USD' and doc.fx_amount %}{{ usd(doc.fx_amount) }}{% else %}{{ money(doc.amount) }} ₪{% endif %}</span>{% if doc.currency == 'USD' and doc.fx_amount %} <span class="num">({{ t('f_rate') }} {{ rate(doc.rate) }} = {{ money(doc.amount) }} ₪)</span>{% endif %}</div>
   <div class="row"><span class="k">{{ t('received_from') if kind == 'receipt' else t('paid_to') }}</span><span class="v">
     {%- if doc.doc_type == 'CONTRIBUTION' -%}{{ names.partner.get(doc.partner_id, '') }}
     {%- elif doc.doc_type == 'RECEIPT' -%}{{ names.customer.get(doc.customer_id, '') }}

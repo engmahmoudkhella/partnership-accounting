@@ -31,11 +31,11 @@
 <div class="grid2">
 <section class="card"><h2>{{ t('nav_accounts') }}</h2>
 <table><thead><tr><th>{{ t('f_name') }}</th><th class="n">{{ t('col_balance') }}</th></tr></thead><tbody>
-{% for a, b in balances %}<tr class="{{ 'inactive' if not a.active }}"><td><a href="/reports/cash/{{ a.id }}">{{ a.name }}</a></td><td class="n">{{ m(b) }}</td></tr>{% else %}<tr><td colspan="2" class="muted">{{ t('empty') }}</td></tr>{% endfor %}
+{% for a, b in balances %}<tr class="{{ 'inactive' if not a.active }}"><td><a href="/reports/cash/{{ a.id }}">{{ a.name }}</a></td><td class="n">{% if a.id in fx_bal %}<b class="num" dir="ltr">{{ usd(fx_bal[a.id]) }}</b><br><small class="muted">≈ {{ m(b) }}</small>{% else %}{{ m(b) }}{% endif %}</td></tr>{% else %}<tr><td colspan="2" class="muted">{{ t('empty') }}</td></tr>{% endfor %}
 </tbody></table></section>
 <section class="card"><h2>{{ t('nav_customers') }}</h2>
 <table><thead><tr><th>{{ t('f_name') }}</th><th class="n">{{ t('col_owed') }}</th></tr></thead><tbody>
-{% for c, b in customers %}<tr><td><a href="/reports/customer/{{ c.id }}">{{ c.name }}</a></td><td class="n">{{ m(b) }}</td></tr>{% else %}<tr><td colspan="2" class="muted">{{ t('empty') }}</td></tr>{% endfor %}
+{% for c, b, ub in customers %}<tr><td><a href="/reports/customer/{{ c.id }}">{{ c.name }}</a></td><td class="n">{% if ub %}<b class="num" dir="ltr">{{ usd(ub) }}</b>{% if b %}<br>{% endif %}{% endif %}{% if b or not ub %}{{ m(b) }}{% endif %}</td></tr>{% else %}<tr><td colspan="2" class="muted">{{ t('empty') }}</td></tr>{% endfor %}
 </tbody></table></section>
 </div>
 {% if partners %}

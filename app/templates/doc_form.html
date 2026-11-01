@@ -1,6 +1,43 @@
 {% extends "base.html" %}
 {% from "macros.html" import csrf_field, err, m with context %}
-{% block title %}{{ t('doc_' + doc_type) }}{% endblock %}
+{% block title %}{{ t('doc_' + doc_type) }}{% if doc_type in fx_types %}<script>
+(function(){
+  const box = document.getElementById('fxbox'); if (!box) return;
+  const type = box.dataset.type, form = box.closest('form');
+  const L = {usd: '$', ils: '₪', eq: {{ t('fx_equals')|tojson }}, rateIs: {{ t('fx_rate_is')|tojson }}};
+  const toN = s => { s = (s||'').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/٫/g,'.').replace(/[,٬\s]/g,''); const n = parseFloat(s); return isNaN(n) ? 0 : n; };
+  const fmt = n => n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const cur = name => { const el = form.querySelector('select[name="' + name + '"]'); if (!el || el.closest('label') && el.closest('label').offsetParent === null) return ''; const o = el.options[el.selectedIndex]; return o ? (o.dataset.cur || '') : ''; };
+  const tag = (f, c) => form.querySelectorAll('.cur-tag[data-for="' + f + '"]').forEach(e => e.textContent = c === 'USD' ? '($)' : '');
+  const show = (sel, on) => box.querySelectorAll(sel).forEach(e => e.hidden = !on);
+  function upd(){
+    const rate = toN(form.querySelector('#fx-rate').value);
+    const field = type === 'PURCHASE' ? 'paid' : type === 'INVOICE' ? 'unit_price' : 'amount';
+    let on = false, eq = '';
+    if (type === 'INVOICE') {
+      on = form.querySelector('#fx-currency').value === 'USD'; box.hidden = false; show('.fx-rate, .fx-equiv', on);
+      tag('unit_price', on ? 'USD' : '');
+      if (on && rate) { const tot = toN((form.querySelector('[name=quantity]')||{}).value) * toN((form.querySelector('[name=unit_price]')||{}).value); eq = L.usd + fmt(tot) + ' ' + L.eq + ' ' + L.ils + fmt(tot * rate); }
+    } else if (type === 'TRANSFER') {
+      const c1 = cur('money_account_id'), c2 = cur('money_account2_id'); on = !!(c1 || c2);
+      box.hidden = !on; show('.fx-rate', !!(c1 && c2)); show('.fx-amount2', on && !(c1 && c2));
+      tag('amount', c1); tag('amount2', c2);
+      const a = toN((form.querySelector('[name=amount]')||{}).value), a2 = toN((form.querySelector('#fx-amount2')||{}).value);
+      if (c1 && c2 && rate && a) eq = L.usd + fmt(a) + ' ' + L.eq + ' ' + L.ils + fmt(a * rate);
+      else if (on && a && a2) eq = L.rateIs + ' ' + (c1 ? (a2 / a) : (a / a2)).toFixed(4);
+    } else {
+      const ps = form.querySelector('input[name=pay_source]:checked');
+      on = cur('money_account_id') === 'USD' && (!ps || ps.value === 'account');
+      box.hidden = !on; tag(field, on ? 'USD' : '');
+      const a = toN((form.querySelector('[name="' + field + '"]')||{}).value);
+      if (on && rate && a) eq = L.usd + fmt(a) + ' ' + L.eq + ' ' + L.ils + fmt(a * rate);
+    }
+    form.querySelector('#fx-equiv').textContent = eq;
+  }
+  form.addEventListener('input', upd); form.addEventListener('change', upd); upd();
+})();
+</script>{% endif %}
+{% endblock %}
 {% block content %}
 <h1>{% if doc %}{{ t('btn_edit') }}: {{ t('doc_' + doc_type) }} <span class="num">#{{ num(doc.number) }}</span>{% else %}{{ t('new') }}: {{ t('doc_' + doc_type) }}{% endif %}</h1>
 <p class="muted">{{ t('help_' + doc_type) }}</p>
@@ -18,7 +55,7 @@
 {% for field, kind, required in fields %}
   {% set label = t(field_label(doc_type, field)) %}
   {% if kind in ('money', 'money0', 'qty') %}
-  <label>{{ label }}{% if required %} *{% endif %}
+  <label>{{ label }}{% if required %} *{% endif %} <b class="cur-tag" data-for="{{ field }}"></b>
     <input type="text" inputmode="decimal" autocomplete="off" name="{{ field }}" value="{{ values.get(field,'') }}" dir="ltr" class="numin" data-kind="{{ kind }}" data-testid="f-{{ field }}">
     <small class="preview" data-for="{{ field }}" aria-live="polite"></small>
   </label>
@@ -49,18 +86,30 @@
     <label class="inline"><input type="radio" name="pay_source" value="partner" {{ 'checked' if values.get('pay_source')=='partner' }} data-testid="pay-partner"> {{ t('pay_by_partner') }}</label>
     {% if kind == 'paysource_credit' %}<label class="inline"><input type="radio" name="pay_source" value="credit" {{ 'checked' if values.get('pay_source')=='credit' }} data-testid="pay-credit"> {{ t('pay_on_credit') }}</label>
     <label class="ps-credit">{{ t('f_supplier_id') }}<select name="supplier_id" data-testid="f-credit-supplier"><option value="">—</option>{% for o in opts.supplier %}<option value="{{ o.id }}" {{ 'selected' if values.get('supplier_id')==o.id|string }}>{{ o.name }}</option>{% endfor %}</select></label>{% endif %}
-    <label class="ps-account">{{ t('f_money_account_id') }}<select name="money_account_id" data-testid="f-money_account_id"><option value="">—</option>{% for a in opts.money_account %}<option value="{{ a.id }}" {{ 'selected' if values.get('money_account_id')==a.id|string }}>{{ a.name }}</option>{% endfor %}</select></label>
+    <label class="ps-account">{{ t('f_money_account_id') }}<select name="money_account_id" data-testid="f-money_account_id"><option value="">—</option>{% for a in opts.money_account %}<option value="{{ a.id }}" data-cur="{{ a.currency or '' }}" {{ 'selected' if values.get('money_account_id')==a.id|string }}>{{ a.name }}{% if a.currency %} (USD){% endif %}</option>{% endfor %}</select></label>
     <label class="ps-partner">{{ t('f_paid_by_partner_id') }}<select name="paid_by_partner_id" data-testid="f-paid_by_partner_id"><option value="">—</option>{% for p in opts.pay_partners %}<option value="{{ p.id }}" {{ 'selected' if values.get('paid_by_partner_id')==p.id|string }}>{{ p.name }}</option>{% endfor %}</select></label>
     <small class="muted">{{ t('help_paid_by_partner') }}</small>
   </fieldset>
   {% else %}
   {% set kind_opts = opts[kind] %}
   <label>{{ label }}{% if required %} *{% endif %}<select name="{{ field }}" data-testid="f-{{ field }}"><option value="">{{ '—' if required else t('none_option_' + kind) if kind in ('project','call','money_account') else '—' }}</option>
-    {% for o in kind_opts %}<option value="{{ o.id }}" {{ 'selected' if values.get(field)==o.id|string }}>{% if kind == 'call' %}{{ t('doc_CAPITAL_CALL') }} #{{ num(o.number) }} · {{ fdate(o.date) }} · {{ money(o.amount) }}{% else %}{{ o.name }}{% endif %}{% if o.active is defined and not o.active %} ({{ t('inactive') }}){% endif %}</option>{% endfor %}
+    {% for o in kind_opts %}<option value="{{ o.id }}" {% if kind == 'money_account' %}data-cur="{{ o.currency or '' }}"{% endif %} {{ 'selected' if values.get(field)==o.id|string }}>{% if kind == 'call' %}{{ t('doc_CAPITAL_CALL') }} #{{ num(o.number) }} · {{ fdate(o.date) }} · {{ money(o.amount) }}{% else %}{{ o.name }}{% endif %}{% if kind == 'money_account' and o.currency %} (USD){% endif %}{% if o.active is defined and not o.active %} ({{ t('inactive') }}){% endif %}</option>{% endfor %}
   </select></label>
   {% endif %}
   {{ err(errors, field) }}
 {% endfor %}
+{% if doc_type in fx_types %}
+<fieldset class="fxbox" id="fxbox" data-type="{{ doc_type }}" data-testid="fxbox">
+  <legend>{{ t('fx_title') }}</legend>
+  {% if doc_type == 'INVOICE' %}<label>{{ t('f_currency') }}<select name="currency" id="fx-currency" data-testid="f-currency"><option value="">{{ t('cur_ILS') }}</option><option value="USD" {{ 'selected' if values.get('currency') == 'USD' }}>{{ t('cur_USD') }}</option></select></label>{% endif %}
+  <p class="muted fx-help">{{ t('fx_help_' + ('transfer' if doc_type == 'TRANSFER' else 'invoice' if doc_type == 'INVOICE' else 'money')) }}</p>
+  <label class="fx-rate">{{ t('f_rate') }} *<input type="text" inputmode="decimal" autocomplete="off" name="rate" id="fx-rate" dir="ltr" value="{{ values.get('rate') or extra.get('usd_rate', '') }}" placeholder="3.65" data-testid="f-rate"></label>
+  {{ err(errors, 'rate') }}
+  {% if doc_type == 'TRANSFER' %}<label class="fx-amount2">{{ t('f_amount2') }} * <b class="cur-tag" data-for="amount2"></b><input type="text" inputmode="decimal" autocomplete="off" name="amount2" id="fx-amount2" dir="ltr" class="numin" data-kind="money" value="{{ values.get('amount2', '') }}" data-testid="f-amount2"><small class="preview" data-for="amount2"></small></label>
+  {{ err(errors, 'amount2') }}{% endif %}
+  <p class="note fx-equiv" id="fx-equiv" aria-live="polite"></p>
+</fieldset>
+{% endif %}
 {% if doc_type == 'PRODUCTION' and extra.get('recipes') %}<div class="note" data-testid="recipe-note">{% for pid, r in extra.recipes.items() %}<div class="recipe-info" data-project="{{ pid }}"><b>{{ t('recipe_per_unit') }} {{ r.unit_name or '' }}:</b> {% for item, q in r.lines %}{{ item.name }} <span class="num" dir="ltr">{{ qty(q) }}</span> {{ item.unit }}{{ '، ' if not loop.last }}{% endfor %} · {{ t('stock_covers') }} <b class="num">{{ num(r.units or 0) }}</b> {{ r.unit_name or '' }}</div>{% endfor %}<small class="muted">{{ t('help_production_recipe') }}</small></div>{% endif %}
 {% if doc_type == 'SUPPLIER_PAYMENT' %}<p class="note" id="sup-debt" data-debts='{{ extra.supplier_debts|tojson }}' data-l-owed="{{ t('sup_owed') }}" data-l-adv="{{ t('sup_advance') }}" data-l-warn="{{ t('warn_more_than_owed') }}"></p>{% endif %}
 {% if doc_type == 'INVOICE' %}<p class="note">{{ t('f_total') }}: <b><span class="num" dir="ltr" id="invoice-total" data-testid="invoice-total">—</span></b></p>{% endif %}
@@ -80,4 +129,41 @@
 <a class="btn" href="{{ '/documents/%d' % doc.id if doc else '/documents' }}">{{ t('btn_cancel') }}</a>
 </div>
 </form>
+{% if doc_type in fx_types %}<script>
+(function(){
+  const box = document.getElementById('fxbox'); if (!box) return;
+  const type = box.dataset.type, form = box.closest('form');
+  const L = {usd: '$', ils: '₪', eq: {{ t('fx_equals')|tojson }}, rateIs: {{ t('fx_rate_is')|tojson }}};
+  const toN = s => { s = (s||'').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/٫/g,'.').replace(/[,٬\s]/g,''); const n = parseFloat(s); return isNaN(n) ? 0 : n; };
+  const fmt = n => n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const cur = name => { const el = form.querySelector('select[name="' + name + '"]'); if (!el || el.closest('label') && el.closest('label').offsetParent === null) return ''; const o = el.options[el.selectedIndex]; return o ? (o.dataset.cur || '') : ''; };
+  const tag = (f, c) => form.querySelectorAll('.cur-tag[data-for="' + f + '"]').forEach(e => e.textContent = c === 'USD' ? '($)' : '');
+  const show = (sel, on) => box.querySelectorAll(sel).forEach(e => e.hidden = !on);
+  function upd(){
+    const rate = toN(form.querySelector('#fx-rate').value);
+    const field = type === 'PURCHASE' ? 'paid' : type === 'INVOICE' ? 'unit_price' : 'amount';
+    let on = false, eq = '';
+    if (type === 'INVOICE') {
+      on = form.querySelector('#fx-currency').value === 'USD'; box.hidden = false; show('.fx-rate, .fx-equiv', on);
+      tag('unit_price', on ? 'USD' : '');
+      if (on && rate) { const tot = toN((form.querySelector('[name=quantity]')||{}).value) * toN((form.querySelector('[name=unit_price]')||{}).value); eq = L.usd + fmt(tot) + ' ' + L.eq + ' ' + L.ils + fmt(tot * rate); }
+    } else if (type === 'TRANSFER') {
+      const c1 = cur('money_account_id'), c2 = cur('money_account2_id'); on = !!(c1 || c2);
+      box.hidden = !on; show('.fx-rate', !!(c1 && c2)); show('.fx-amount2', on && !(c1 && c2));
+      tag('amount', c1); tag('amount2', c2);
+      const a = toN((form.querySelector('[name=amount]')||{}).value), a2 = toN((form.querySelector('#fx-amount2')||{}).value);
+      if (c1 && c2 && rate && a) eq = L.usd + fmt(a) + ' ' + L.eq + ' ' + L.ils + fmt(a * rate);
+      else if (on && a && a2) eq = L.rateIs + ' ' + (c1 ? (a2 / a) : (a / a2)).toFixed(4);
+    } else {
+      const ps = form.querySelector('input[name=pay_source]:checked');
+      on = cur('money_account_id') === 'USD' && (!ps || ps.value === 'account');
+      box.hidden = !on; tag(field, on ? 'USD' : '');
+      const a = toN((form.querySelector('[name="' + field + '"]')||{}).value);
+      if (on && rate && a) eq = L.usd + fmt(a) + ' ' + L.eq + ' ' + L.ils + fmt(a * rate);
+    }
+    form.querySelector('#fx-equiv').textContent = eq;
+  }
+  form.addEventListener('input', upd); form.addEventListener('change', upd); upd();
+})();
+</script>{% endif %}
 {% endblock %}

@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 
-from .numbers import NumberError, normalize_digits, parse_id, parse_money, parse_quantity
+from .numbers import NumberError, normalize_digits, parse_id, parse_money, parse_quantity, parse_rate
 
 # (field, kind, required)
 # kinds: money, money0 (zero allowed), qty, partner, money_account, customer, project, asset, call,
@@ -42,6 +42,10 @@ MAX_ITEM_ROWS = 40
 
 ATTACHMENT_TYPES = ("EXPENSE", "ASSET_PURCHASE", "INVOICE", "RECEIPT", "CONTRIBUTION", "TRANSFER",
                     "DISTRIBUTION", "ASSET_DISPOSAL", "CAPITAL_TRANSFER", "PURCHASE", "SUPPLIER_PAYMENT")
+
+# documents that can be in dollars (a dollar money account, or a dollar invoice)
+FX_TYPES = ("CONTRIBUTION", "EXPENSE", "ASSET_PURCHASE", "ASSET_DISPOSAL", "RECEIPT", "DISTRIBUTION",
+            "SUPPLIER_PAYMENT", "PURCHASE", "TRANSFER", "INVOICE")
 
 # label key for a field, per document type when it differs
 FIELD_LABELS = {
@@ -161,4 +165,20 @@ def parse_document_form(doc_type: str, form) -> tuple[dict, dict, dict]:
                 data[field] = _int_or_none(raw)
         except NumberError as e:
             errors[field] = e
+    if doc_type in FX_TYPES:
+        raw = form.get("rate") or ""
+        if isinstance(raw, str) and raw.strip():
+            try:
+                data["rate"] = parse_rate(raw)
+            except NumberError as e:
+                errors["rate"] = e
+        if doc_type == "INVOICE":
+            data["currency"] = "USD" if form.get("currency") == "USD" else ""
+        if doc_type == "TRANSFER":
+            raw = form.get("amount2") or ""
+            if isinstance(raw, str) and raw.strip():
+                try:
+                    data["amount2"] = parse_money(raw)
+                except NumberError as e:
+                    errors["amount2"] = e
     return data, extras, errors

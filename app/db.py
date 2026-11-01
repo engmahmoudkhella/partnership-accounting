@@ -46,6 +46,16 @@ ADDED_COLUMNS = [
     ("projects", "packaging_per_unit", "INTEGER NOT NULL DEFAULT 0"),
     ("projects", "labor_per_unit", "INTEGER NOT NULL DEFAULT 0"),
     ("projects", "other_per_unit", "INTEGER NOT NULL DEFAULT 0"),
+    ("money_accounts", "currency", "VARCHAR(3) NOT NULL DEFAULT ''"),
+    ("documents", "currency", "VARCHAR(3) NOT NULL DEFAULT ''"),
+    ("documents", "fx_amount", "INTEGER NOT NULL DEFAULT 0"),
+    ("documents", "fx_amount2", "INTEGER NOT NULL DEFAULT 0"),
+    ("documents", "rate", "INTEGER NOT NULL DEFAULT 0"),
+    ("journal_lines", "currency", "VARCHAR(3) NOT NULL DEFAULT ''"),
+    ("journal_lines", "fx", "INTEGER NOT NULL DEFAULT 0"),
+    ("opening_lines", "fx", "INTEGER NOT NULL DEFAULT 0"),
+    ("contracts", "currency", "VARCHAR(3) NOT NULL DEFAULT ''"),
+    ("quotes", "currency", "VARCHAR(3) NOT NULL DEFAULT ''"),
 ]
 
 

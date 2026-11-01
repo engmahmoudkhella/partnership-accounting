@@ -170,6 +170,35 @@ def parse_percent(text, *, allow_zero: bool = False) -> int:
     return value
 
 
+RATE_DECIMALS = 4  # exchange rate: shekels per dollar, e.g. 3.6512
+
+
+def parse_rate(text) -> int:
+    """Shekels per dollar ("3.65") -> x10,000 (36500). Must be positive and sensible."""
+    value = _parse_decimal(text, RATE_DECIMALS)
+    if value <= 0:
+        raise NumberError("err_rate_required")
+    if value > 1000 * 10 ** RATE_DECIMALS:
+        raise NumberError("err_number_too_large")
+    return value
+
+
+def convert(fx_minor: int, rate: int) -> int:
+    """Dollar cents x rate (x10,000) -> agorot, rounded half-up."""
+    return round_half_up_div(int(fx_minor) * int(rate), 10 ** RATE_DECIMALS)
+
+
+def format_rate(rate: int, digits: str = "latn") -> str:
+    return _fmt_fixed(int(rate or 0), RATE_DECIMALS, digits, strip_zeros=True)
+
+
+def rate_input_value(rate: int | None) -> str:
+    if not rate:
+        return ""
+    whole, frac = divmod(int(rate), 10 ** RATE_DECIMALS)
+    return f"{whole}.{frac:04d}".rstrip("0").rstrip(".")
+
+
 def parse_int(text, *, allow_zero: bool = True) -> int:
     value = _parse_decimal(text, 0)
     if value == 0 and not allow_zero:
@@ -375,16 +404,18 @@ def number_to_english_words(n: int) -> str:
     return " ".join(parts)
 
 
-def amount_in_words(minor: int, lang: str = "ar") -> str:
-    """Shekels and agorot in words, the way receipts are written: «فقط ... شيكل و... أغورة لا غير»."""
+def amount_in_words(minor: int, lang: str = "ar", currency: str = "") -> str:
+    """Shekels and agorot in words, the way receipts are written: «فقط ... شيكل و... أغورة لا غير».
+    ``currency="USD"``: dollars and cents."""
     minor = abs(int(minor or 0))
     shekels, agorot = divmod(minor, 100)
+    usd = currency == "USD"
     if lang == "ar":
-        s = f"فقط {number_to_arabic_words(shekels)} شيكل"
+        s = f"فقط {number_to_arabic_words(shekels)} {'دولار أمريكي' if usd else 'شيكل'}"
         if agorot:
-            s += f" و{number_to_arabic_words(agorot)} أغورة"
+            s += f" و{number_to_arabic_words(agorot)} {'سنت' if usd else 'أغورة'}"
         return s + " لا غير"
-    s = f"{number_to_english_words(shekels)} shekels"
+    s = f"{number_to_english_words(shekels)} {'US dollars' if usd else 'shekels'}"
     if agorot:
-        s += f" and {number_to_english_words(agorot)} agorot"
+        s += f" and {number_to_english_words(agorot)} {'cents' if usd else 'agorot'}"
     return s[0].upper() + s[1:] + " only"
