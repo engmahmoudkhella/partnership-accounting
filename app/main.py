@@ -30,6 +30,7 @@ from .models import (
     Approval,
     Asset,
     AuditLog,
+    Contract,
     Customer,
     Document,
     JournalLine,
@@ -432,6 +433,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         if not ctx.s.scalar(select(func.count(User.id))):
             raise Redirect("/setup")
         require(ctx)
+        run_due_contracts(ctx)
         L = ctx.L
         accounts = list(ctx.s.scalars(select(MoneyAccount).order_by(MoneyAccount.id)))
         balances = [(a, L.balance(CASH, money_account_id=a.id)) for a in accounts]
@@ -534,6 +536,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @page
     async def documents(ctx: Ctx):
         require(ctx)
+        run_due_contracts(ctx)
         q = ctx.request.query_params
         stmt = select(Document)
         if q.get("type") in DOC_TYPES:
@@ -901,6 +904,80 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     # ------------------------------------------------------------ master data
 
     MASTER = {"project": Project, "money_account": MoneyAccount, "customer": Customer}
+
+    # ------------------------------------------------------------ monthly contracts
+
+    def run_due_contracts(ctx):
+        """Create this month's rent documents when an admin or accountant opens the app.
+        Never breaks the page: a failure is rolled back and logged."""
+        try:
+            if ctx.L.run_contracts():
+                ctx.s.commit()
+        except Exception:  # noqa: BLE001
+            ctx.s.rollback()
+            import logging
+            logging.getLogger("pa").exception("running monthly contracts failed")
+
+    @app.get("/contracts", response_class=HTMLResponse)
+    @page
+    async def contracts_page(ctx: Ctx):
+        require(ctx)
+        run_due_contracts(ctx)
+        items = list(ctx.s.scalars(select(Contract).order_by(Contract.active.desc(), Contract.id)))
+        names = {
+            "project": {o.id: o.name for o in ctx.s.scalars(select(Project))},
+            "customer": {o.id: o.name for o in ctx.s.scalars(select(Customer))},
+            "partner": {o.id: o.name for o in ctx.s.scalars(select(Partner))},
+            "money_account": {o.id: o.name for o in ctx.s.scalars(select(MoneyAccount))},
+        }
+        rows = []
+        for c in items:
+            end = ctx.L.contract_period_date(c.start_date, c.months - 1)
+            nxt = None
+            if c.active and len(c.runs) < c.months:
+                nxt = ctx.L.contract_period_date(c.start_date, len(c.runs))
+            err = None
+            if c.last_error:
+                params = dict(c.last_error.get("params") or {})
+                err = ctx.t(c.last_error.get("code", ""), **params)
+            rows.append({"c": c, "end": end, "next": nxt, "done": len(c.runs), "error": err,
+                         "total": c.amount * c.months})
+        return render(ctx, "contracts.html", rows=rows, names=names, opts=form_options(ctx),
+                      categories=EXPENSE_CATEGORIES)
+
+    @app.post("/contracts/save")
+    @page
+    async def contracts_save(ctx: Ctx, form):
+        require(ctx, "admin", "accountant")
+        kind = form.get("kind", "")
+        pay = form.get("pay_source", "account")
+        c = ctx.L.save_contract(
+            name=form.get("name", ""), kind=kind, amount=N.parse_money(form.get("amount", "")),
+            start_date=parse_date(form.get("start_date", "")), months=N.parse_int(form.get("months", ""), allow_zero=False),
+            project_id=safe_id(form.get("project_id")), customer_id=safe_id(form.get("customer_id")),
+            category=form.get("category", "rent"),
+            money_account_id=safe_id(form.get("money_account_id")) if pay == "account" else None,
+            paid_by_partner_id=safe_id(form.get("paid_by_partner_id")) if pay == "partner" else None,
+            supplier=form.get("supplier", ""))
+        made = ctx.L.run_contracts()
+        flash(ctx.request, "ok", ctx.t("msg_contract_saved", made=made))
+        raise_commit_redirect(ctx, "/contracts")
+
+    @app.post("/contracts/{cid:int}/stop")
+    @page
+    async def contracts_stop(ctx: Ctx, cid: int, form):
+        require(ctx, "admin", "accountant")
+        ctx.L.stop_contract(get_or_404(ctx, Contract, cid))
+        flash(ctx.request, "ok", ctx.t("msg_saved"))
+        raise_commit_redirect(ctx, "/contracts")
+
+    @app.post("/contracts/{cid:int}/delete")
+    @page
+    async def contracts_delete(ctx: Ctx, cid: int, form):
+        require(ctx, "admin", "accountant")
+        ctx.L.delete_contract(get_or_404(ctx, Contract, cid))
+        flash(ctx.request, "ok", ctx.t("msg_deleted"))
+        raise_commit_redirect(ctx, "/contracts")
 
     @app.get("/master/{entity}", response_class=HTMLResponse)
     @page

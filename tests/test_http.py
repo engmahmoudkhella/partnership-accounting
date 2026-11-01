@@ -7,7 +7,7 @@ import re
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.i18n import T
 from app.main import create_app
@@ -628,3 +628,35 @@ def test_security_headers_and_cookie(app, tmp_path):
     r = c.get("/setup")
     cookie = r.headers.get("set-cookie", "")
     assert "httponly" in cookie.lower() and "samesite=lax" in cookie.lower()
+
+
+def test_monthly_contracts_via_form(ready):
+    c = ready
+    ids = c.ids
+    # land rent 2,000 a month for 12 months, paid personally by the contractor, typed with Arabic digits
+    r = c.post("/contracts/save", {"kind": "expense", "name": "إيجار الأرض", "amount": "٢٬٠٠٠",
+                                   "start_date": "2026-10-01", "months": "١٢", "project_id": str(ids["project"]),
+                                   "category": "rent", "supplier": "المؤجر", "pay_source": "partner",
+                                   "paid_by_partner_id": str(ids["partners"][0])}, page="/contracts")
+    assert "flash ok" in r.text and "إيجار الأرض" in r.text
+    # building rented to the customer for 3,000 a month
+    r = c.post("/contracts/save", {"kind": "income", "name": "تأجير البركس", "amount": "3000",
+                                   "start_date": "2026-10-01", "months": "12", "project_id": str(ids["project"]),
+                                   "customer_id": str(ids["customer"])}, page="/contracts")
+    assert "flash ok" in r.text
+    s, L = ledger(c)
+    docs = list(s.scalars(select(Document).where(Document.doc_type.in_(("EXPENSE", "INVOICE")))))
+    assert sorted((d.doc_type, d.amount) for d in docs) == [("EXPENSE", 200_000), ("INVOICE", 300_000)]
+    s.close()
+    # opening the dashboard again does not duplicate anything
+    c.get("/")
+    c.get("/contracts")
+    s, L = ledger(c)
+    assert s.scalar(select(func.count(Document.id)).where(Document.doc_type.in_(("EXPENSE", "INVOICE")))) == 2
+    s.close()
+    r = c.get("/contracts")
+    assert "1 / 12" in r.text
+    # an income contract without a customer is refused with a clear message
+    r = c.post("/contracts/save", {"kind": "income", "name": "خطأ", "amount": "1", "start_date": "2026-10-01",
+                                   "months": "1", "project_id": str(ids["project"])}, page="/contracts")
+    assert "اختر الجهة" in r.text

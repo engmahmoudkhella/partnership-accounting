@@ -36,6 +36,8 @@ from .models import (
     Asset,
     AuditLog,
     CallShare,
+    Contract,
+    ContractRun,
     Customer,
     Document,
     JournalLine,
@@ -199,6 +201,118 @@ class Ledger:
             if d < od:
                 raise BusinessError("err_date_before_opening", opening=od.isoformat())
         self._check_date_open(d)
+
+    # ---------------------------------------------------------------- monthly contracts
+
+    @staticmethod
+    def contract_period_date(start: dt.date, period: int) -> dt.date:
+        m = start.month - 1 + period
+        y, m = start.year + m // 12, m % 12 + 1
+        last = (dt.date(y + (m == 12), m % 12 + 1, 1) - dt.timedelta(days=1)).day
+        return dt.date(y, m, min(start.day, last))
+
+    def save_contract(self, *, name: str, kind: str, amount: int, start_date: dt.date, months: int,
+                      project_id: int | None = None, customer_id: int | None = None, category: str = "rent",
+                      money_account_id: int | None = None, paid_by_partner_id: int | None = None,
+                      supplier: str = "") -> Contract:
+        self._require_role("admin", "accountant")
+        name = (name or "").strip()
+        if not name:
+            raise BusinessError("err_name_required")
+        if kind not in ("expense", "income"):
+            raise BusinessError("err_invalid_choice")
+        if not isinstance(amount, int) or amount <= 0:
+            raise BusinessError("err_amount_positive")
+        if not isinstance(start_date, dt.date):
+            raise BusinessError("err_date_required")
+        if not isinstance(months, int) or not 1 <= months <= 120:
+            raise BusinessError("err_contract_months")
+        if project_id is not None and self.s.get(Project, project_id) is None:
+            raise BusinessError("err_not_found")
+        if kind == "income":
+            if customer_id is None or self.s.get(Customer, customer_id) is None:
+                raise BusinessError("err_customer_required")
+            if project_id is None:
+                raise BusinessError("err_project_required")
+            money_account_id = paid_by_partner_id = None
+            category = ""
+        else:
+            customer_id = None
+            if category not in EXPENSE_CATEGORIES:
+                raise BusinessError("err_invalid_choice")
+            if (money_account_id is None) == (paid_by_partner_id is None):
+                raise BusinessError("err_pay_source")
+            if money_account_id is not None and self.s.get(MoneyAccount, money_account_id) is None:
+                raise BusinessError("err_not_found")
+            if paid_by_partner_id is not None and self.s.get(Partner, paid_by_partner_id) is None:
+                raise BusinessError("err_not_found")
+        c = Contract(name=name, kind=kind, amount=amount, start_date=start_date, months=months,
+                     project_id=project_id, customer_id=customer_id, category=category,
+                     money_account_id=money_account_id, paid_by_partner_id=paid_by_partner_id,
+                     supplier=(supplier or "").strip(), created_by=self.user.id if self.user else None)
+        self.s.add(c)
+        self.s.flush()
+        self.audit("create", "contract", c.id, None, {"name": c.name, "kind": kind, "amount": amount,
+                                                      "start_date": start_date.isoformat(), "months": months})
+        return c
+
+    def contract_runs_done(self, c: Contract) -> int:
+        return len(c.runs)
+
+    def run_contracts(self) -> int:
+        """Create the documents of every month that is due (date <= today) and not created yet.
+        Each month is created on its own; if one cannot be created (e.g. month locked, before the
+        opening) the reason is kept on the contract and that contract waits; nothing else is affected."""
+        if self.role not in ("admin", "accountant"):
+            return 0
+        made = 0
+        for c in self.s.scalars(select(Contract).where(Contract.active.is_(True)).order_by(Contract.id)):
+            done = {r.period for r in c.runs}
+            for period in range(c.months):
+                if period in done:
+                    continue
+                d = self.contract_period_date(c.start_date, period)
+                if d > self.today:
+                    break
+                label = f"{d.month:02d}/{d.year}"
+                desc = f"{c.name} — {label} ({period + 1}/{c.months})"
+                sp = self.s.begin_nested()
+                try:
+                    if c.kind == "income":
+                        doc = self.create_document("INVOICE", d, {
+                            "customer_id": c.customer_id, "project_id": c.project_id, "quantity": 1000,
+                            "unit_price": c.amount, "description": desc})
+                    else:
+                        doc = self.create_document("EXPENSE", d, {
+                            "category": c.category, "project_id": c.project_id, "amount": c.amount,
+                            "money_account_id": c.money_account_id, "paid_by_partner_id": c.paid_by_partner_id,
+                            "supplier": c.supplier, "description": desc})
+                    self.s.add(ContractRun(contract_id=c.id, period=period, document_id=doc.id))
+                    self.s.flush()
+                    sp.commit()
+                except BusinessError as e:
+                    sp.rollback()
+                    c.last_error = {"code": e.code, "params": dict(e.params or {}), "period": period}
+                    self.s.flush()
+                    break
+                made += 1
+                if c.last_error:
+                    c.last_error = None
+            self.s.expire(c, ["runs"])
+        return made
+
+    def stop_contract(self, c: Contract):
+        self._require_role("admin", "accountant")
+        c.active = False
+        self.audit("stop", "contract", c.id, None, {"name": c.name, "months_created": len(c.runs)})
+
+    def delete_contract(self, c: Contract):
+        self._require_role("admin", "accountant")
+        if any(r.document_id for r in c.runs):
+            raise BusinessError("err_contract_has_docs")
+        self.audit("delete", "contract", c.id, {"name": c.name}, None)
+        self.s.delete(c)
+        self.s.flush()
 
     # ---------------------------------------------------------------- shares
 

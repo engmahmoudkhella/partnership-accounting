@@ -176,6 +176,31 @@ async function waitForServer() {
     await page.goto(BASE + "/");
     await page.screenshot({ path: path.join(SHOTS, "05-dashboard-ar.png"), fullPage: true });
 
+    console.log("9b. Monthly contracts (rents)");
+    await page.goto(BASE + "/contracts");
+    check(!(await page.locator(".ck-income").isVisible()), "income fields hidden for an expense contract");
+    await page.fill("[data-testid=c-name]", "إيجار الأرض");
+    await page.fill("[data-testid=c-amount]", "٢٠٠٠");
+    await page.fill("[data-testid=c-start]", monthStart);
+    await page.check("[data-testid=c-pay-partner]");
+    await page.selectOption("[data-testid=c-partner]", { index: 1 });
+    await page.click("[data-testid=c-save]");
+    check((await page.textContent(".flash.ok")).includes("1"), "land rent saved and this month recorded");
+    await page.check("[data-testid=ck-income]");
+    check(await page.locator("[data-testid=c-customer]").isVisible(), "customer field shown for an income contract");
+    await page.fill("[data-testid=c-name]", "تأجير البركس");
+    await page.fill("[data-testid=c-amount]", "3000");
+    await page.fill("[data-testid=c-start]", monthStart);
+    await page.selectOption("[data-testid=c-project]", { index: 1 });
+    await page.selectOption("[data-testid=c-customer]", { index: 1 });
+    await page.click("[data-testid=c-save]");
+    check((await page.locator("[data-testid=contracts-table] tbody tr").count()) === 2, "2 contracts listed");
+    check((await page.textContent("[data-testid=contracts-table]")).includes("1 / 12"), "progress 1 / 12");
+    await page.screenshot({ path: path.join(SHOTS, "10-contracts-ar.png"), fullPage: true });
+    await page.goto(BASE + "/reports/trial");
+    check((await page.textContent("[data-testid=trial-status]")).includes("✓"), "trial balance still balanced");
+    await page.goto(BASE + "/");
+
     console.log("10. Switch to English");
     await page.click("[data-testid=lang-switch]");
     check((await page.getAttribute("html", "dir")) === "ltr", "English page is left-to-right");

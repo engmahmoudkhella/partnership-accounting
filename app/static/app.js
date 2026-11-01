@@ -60,6 +60,16 @@
     fs.querySelector(".ps-partner").style.display = v === "partner" ? "" : "none";
   }
   document.querySelectorAll("input[name=pay_source]").forEach(function (r) { r.addEventListener("change", paysource); });
+  // monthly contract form: show the fields of the chosen type
+  function ckind() {
+    var f = document.querySelector("[data-testid=contract-form]");
+    if (!f) return;
+    var v = (f.querySelector("input[name=kind]:checked") || {}).value || "expense";
+    f.querySelector(".ck-income").style.display = v === "income" ? "" : "none";
+    f.querySelector(".ck-expense").style.display = v === "expense" ? "" : "none";
+  }
+  document.querySelectorAll("input[name=kind]").forEach(function (r) { r.addEventListener("change", ckind); });
+  ckind();
   paysource();
   function val(name, d) {
     var el = document.querySelector("[name=" + name + "]");

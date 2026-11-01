@@ -309,3 +309,41 @@ class AuditLog(Base):
     before: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     after: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     note: Mapped[str] = mapped_column(Text, default="")
+
+
+# ------------------------------------------------------------------ monthly contracts
+
+class Contract(Base):
+    """A monthly amount for a fixed number of months: a rent the partnership pays (expense)
+    or a rent it charges a customer (income). One document is created per month when due."""
+    __tablename__ = "contracts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    kind: Mapped[str] = mapped_column(String(10))  # expense | income
+    amount: Mapped[int] = mapped_column(Integer)
+    start_date: Mapped[dt.date] = mapped_column(Date)
+    months: Mapped[int] = mapped_column(Integer)
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"), nullable=True)
+    category: Mapped[str] = mapped_column(String(30), default="rent")
+    money_account_id: Mapped[int | None] = mapped_column(ForeignKey("money_accounts.id"), nullable=True)
+    paid_by_partner_id: Mapped[int | None] = mapped_column(ForeignKey("partners.id"), nullable=True)
+    supplier: Mapped[str] = mapped_column(String(200), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_error: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+    runs = relationship("ContractRun", cascade="all, delete-orphan", order_by="ContractRun.period")
+
+
+class ContractRun(Base):
+    __tablename__ = "contract_runs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    contract_id: Mapped[int] = mapped_column(ForeignKey("contracts.id"))
+    period: Mapped[int] = mapped_column(Integer)  # 0 = first month
+    document_id: Mapped[int | None] = mapped_column(ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
+
+    document = relationship("Document")
+
+    __table_args__ = (UniqueConstraint("contract_id", "period"),)
