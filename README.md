@@ -129,7 +129,7 @@ bash /opt/partnership-accounting/deploy/install.sh
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest -q tests                  # 387 اختباراً
+python -m pytest -q tests                  # 388 اختباراً
 PROP_EXAMPLES=400 python -m pytest tests/test_property.py   # تشغيل عشوائي مكثف
 node e2e/run.js                            # متصفح حقيقي (Playwright)
 ```

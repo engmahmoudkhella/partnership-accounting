@@ -1479,8 +1479,17 @@ class Ledger:
             latest = self.share_percent_at(as_of or self.today)
         except BusinessError:
             latest = {}
-        for p in self.s.scalars(select(Partner).order_by(Partner.id)):
-            cap = self.balance(CAP, as_of, partner_id=p.id)
+        # what each partner should have paid in, by his current share, out of all capital paid so far:
+        # positive gap = he still owes that much (to the partners who paid more), negative = owed to him
+        partners = list(self.s.scalars(select(Partner).order_by(Partner.id)))
+        caps = {p.id: self.balance(CAP, as_of, partner_id=p.id) for p in partners}
+        try:
+            weights = self.shares_at(as_of or self.today)
+            target = allocate(sum(caps.values()), weights) if weights else {}
+        except BusinessError:
+            target = None
+        for p in partners:
+            cap = caps[p.id]
             dist = self._partner_dist(p.id, as_of)
             profit = alloc.get(p.id, 0)
             called = int(self.s.scalar(
@@ -1494,7 +1503,9 @@ class Ledger:
                     *([Document.date <= as_of] if as_of else []))))
             rows.append({"partner": p, "share": latest.get(p.id, 0), "capital": cap, "profit": profit,
                          "distributions": dist, "equity": cap + profit - dist, "called": called,
-                         "paid_to_calls": paid_to_calls, "outstanding_calls": called - paid_to_calls})
+                         "paid_to_calls": paid_to_calls, "outstanding_calls": called - paid_to_calls,
+                         "capital_target": None if target is None else target.get(p.id, 0),
+                         "capital_gap": None if target is None else target.get(p.id, 0) - cap})
         return rows
 
     def _partner_dist(self, pid: int, as_of: dt.date | None) -> int:

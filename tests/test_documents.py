@@ -440,3 +440,31 @@ def test_capital_call_shares_follow_share_version_at_date(opened):
     assert {c.partner_id: c.amount for c in early.call_shares}[w.contractor.id] == 300
     assert {c.partner_id: c.amount for c in late.call_shares} == {w.contractor.id: 300, w.mahmoud.id: 300}
     assert w.s.scalars(select(CallShare)).all()
+
+
+def test_capital_gap_shows_who_owes_whom_and_closes_with_transfers(world):
+    w = world
+    # the user's case: shares 50 / 20.1 / 19.9 / 10, the contractor alone paid 180,000
+    w.L.create_share_version(dt.date(2026, 9, 1), {w.contractor.id: 500_000, w.mahmoud.id: 201_000,
+                                                   w.momen.id: 199_000, w.ahmad.id: 100_000})
+    w.L.save_opening(OPEN, money={w.cash.id: 18_000_000}, customers={}, assets=[],
+                     partners={w.contractor.id: 18_000_000})
+    w.s.commit()
+    gap = {r["partner"].id: r["capital_gap"] for r in w.L.partner_summary()}
+    assert gap == {w.contractor.id: -9_000_000, w.mahmoud.id: 3_618_000, w.momen.id: 3_582_000,
+                   w.ahmad.id: 1_800_000}
+    assert sum(gap.values()) == 0
+    # Mahmoud pays the contractor his part directly
+    w.L.create_document("CAPITAL_TRANSFER", D(2), {"partner_id": w.mahmoud.id, "partner2_id": w.contractor.id,
+                                                   "amount": 3_618_000})
+    w.s.commit()
+    gap = {r["partner"].id: r["capital_gap"] for r in w.L.partner_summary()}
+    assert gap[w.mahmoud.id] == 0 and gap[w.contractor.id] == -5_382_000
+    # a capital call split by shares keeps the gaps unchanged once everyone pays his part
+    call = w.L.create_document("CAPITAL_CALL", D(3), {"amount": 1_000_000})
+    for cs in call.call_shares:
+        w.L.create_document("CONTRIBUTION", D(3), {"partner_id": cs.partner_id, "money_account_id": w.cash.id,
+                                                   "amount": cs.amount, "capital_call_id": call.id})
+    w.s.commit()
+    gap2 = {r["partner"].id: r["capital_gap"] for r in w.L.partner_summary()}
+    assert gap2 == gap

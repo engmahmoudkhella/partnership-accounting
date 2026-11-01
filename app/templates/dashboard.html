@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import m, status with context %}
+{% from "macros.html" import m, status, gap with context %}
 {% block title %}{{ t('nav_dashboard') }}{% endblock %}
 {% block content %}
 <h1>{{ t('nav_dashboard') }}</h1>
@@ -38,8 +38,8 @@
 </div>
 {% if partners %}
 <section class="card"><h2>{{ t('nav_partners') }}</h2>
-<div class="scroll"><table><thead><tr><th>{{ t('f_name') }}</th><th class="n">{{ t('col_share') }}</th><th class="n">{{ t('col_capital') }}</th><th class="n">{{ t('col_profit_share') }}</th><th class="n">{{ t('col_distributions') }}</th><th class="n">{{ t('col_equity') }}</th><th class="n">{{ t('col_outstanding_calls') }}</th></tr></thead><tbody>
-{% for r in partners %}<tr><td><a href="/reports/partner/{{ r.partner.id }}">{{ r.partner.name }}</a></td><td class="n"><span class="num" dir="ltr">{{ pct(r.share) }}</span></td><td class="n">{{ m(r.capital) }}</td><td class="n">{{ m(r.profit) }}</td><td class="n">{{ m(r.distributions) }}</td><td class="n">{{ m(r.equity) }}</td><td class="n {{ 'neg' if r.outstanding_calls > 0 }}">{{ m(r.outstanding_calls) }}</td></tr>{% endfor %}
+<div class="scroll"><table><thead><tr><th>{{ t('f_name') }}</th><th class="n">{{ t('col_share') }}</th><th class="n">{{ t('col_capital') }}</th><th class="n">{{ t('col_capital_gap') }}</th><th class="n">{{ t('col_profit_share') }}</th><th class="n">{{ t('col_distributions') }}</th><th class="n">{{ t('col_equity') }}</th><th class="n">{{ t('col_outstanding_calls') }}</th></tr></thead><tbody>
+{% for r in partners %}<tr><td><a href="/reports/partner/{{ r.partner.id }}">{{ r.partner.name }}</a></td><td class="n"><span class="num" dir="ltr">{{ pct(r.share) }}</span></td><td class="n">{{ m(r.capital) }}</td><td class="n">{{ gap(r.capital_gap) }}</td><td class="n">{{ m(r.profit) }}</td><td class="n">{{ m(r.distributions) }}</td><td class="n">{{ m(r.equity) }}</td><td class="n {{ 'neg' if r.outstanding_calls > 0 }}">{{ m(r.outstanding_calls) }}</td></tr>{% endfor %}
 </tbody></table></div></section>
 {% endif %}
 {% if projects %}

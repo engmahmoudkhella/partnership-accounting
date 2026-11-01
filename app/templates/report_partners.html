@@ -1,14 +1,15 @@
 {% extends "base.html" %}
-{% from "macros.html" import m with context %}
+{% from "macros.html" import m, gap with context %}
 {% block title %}{{ t('rep_partners') }}{% endblock %}
 {% block content %}
 {% include "_reports_nav.html" %}
 <h1>{{ t('rep_partners') }}</h1>
 <form class="filters"><label class="inline">{{ t('as_of') }} <input type="date" name="as_of" value="{{ as_of.isoformat() if as_of else '' }}"></label><button>{{ t('btn_filter') }}</button></form>
-<section class="card"><div class="scroll"><table data-testid="partners-report"><thead><tr><th>{{ t('f_name') }}</th><th class="n">{{ t('col_share') }}</th><th class="n">{{ t('col_capital') }}</th><th class="n">{{ t('col_profit_share') }}</th><th class="n">{{ t('col_distributions') }}</th><th class="n">{{ t('col_equity') }}</th><th class="n">{{ t('col_called') }}</th><th class="n">{{ t('col_paid') }}</th><th class="n">{{ t('col_outstanding_calls') }}</th></tr></thead><tbody>
-{% for r in rows %}<tr><td><a href="/reports/partner/{{ r.partner.id }}">{{ r.partner.name }}</a></td><td class="n"><span class="num" dir="ltr">{{ pct(r.share) }}</span></td><td class="n">{{ m(r.capital) }}</td><td class="n">{{ m(r.profit) }}</td><td class="n">{{ m(r.distributions) }}</td><td class="n"><b>{{ m(r.equity) }}</b></td><td class="n">{{ m(r.called) }}</td><td class="n">{{ m(r.paid_to_calls) }}</td><td class="n {{ 'neg' if r.outstanding_calls > 0 }}">{{ m(r.outstanding_calls) }}</td></tr>{% endfor %}
+<section class="card"><div class="scroll"><table data-testid="partners-report"><thead><tr><th>{{ t('f_name') }}</th><th class="n">{{ t('col_share') }}</th><th class="n">{{ t('col_capital') }}</th><th class="n">{{ t('col_capital_target') }}</th><th class="n">{{ t('col_capital_gap') }}</th><th class="n">{{ t('col_profit_share') }}</th><th class="n">{{ t('col_distributions') }}</th><th class="n">{{ t('col_equity') }}</th><th class="n">{{ t('col_called') }}</th><th class="n">{{ t('col_paid') }}</th><th class="n">{{ t('col_outstanding_calls') }}</th></tr></thead><tbody>
+{% for r in rows %}<tr><td><a href="/reports/partner/{{ r.partner.id }}">{{ r.partner.name }}</a></td><td class="n"><span class="num" dir="ltr">{{ pct(r.share) }}</span></td><td class="n">{{ m(r.capital) }}</td><td class="n">{% if r.capital_target is not none %}{{ m(r.capital_target) }}{% else %}—{% endif %}</td><td class="n" data-testid="gap-{{ r.partner.id }}">{{ gap(r.capital_gap) }}</td><td class="n">{{ m(r.profit) }}</td><td class="n">{{ m(r.distributions) }}</td><td class="n"><b>{{ m(r.equity) }}</b></td><td class="n">{{ m(r.called) }}</td><td class="n">{{ m(r.paid_to_calls) }}</td><td class="n {{ 'neg' if r.outstanding_calls > 0 }}">{{ m(r.outstanding_calls) }}</td></tr>{% endfor %}
 </tbody>
-<tfoot><tr><th>{{ t('total') }}</th><th></th><th class="n">{{ m(rows|sum(attribute='capital')) }}</th><th class="n">{{ m(rows|sum(attribute='profit')) }}</th><th class="n">{{ m(rows|sum(attribute='distributions')) }}</th><th class="n">{{ m(rows|sum(attribute='equity')) }}</th><th class="n">{{ m(rows|sum(attribute='called')) }}</th><th class="n">{{ m(rows|sum(attribute='paid_to_calls')) }}</th><th class="n">{{ m(rows|sum(attribute='outstanding_calls')) }}</th></tr></tfoot></table></div>
+<tfoot><tr><th>{{ t('total') }}</th><th></th><th class="n">{{ m(rows|sum(attribute='capital')) }}</th><th></th><th></th><th class="n">{{ m(rows|sum(attribute='profit')) }}</th><th class="n">{{ m(rows|sum(attribute='distributions')) }}</th><th class="n">{{ m(rows|sum(attribute='equity')) }}</th><th class="n">{{ m(rows|sum(attribute='called')) }}</th><th class="n">{{ m(rows|sum(attribute='paid_to_calls')) }}</th><th class="n">{{ m(rows|sum(attribute='outstanding_calls')) }}</th></tr></tfoot></table></div>
 <p class="note">{{ t('tile_distributable') }}: {{ m(distributable) }}</p>
+<p class="muted">{{ t('help_capital_gap') }}</p>
 <p class="muted">{{ t('help_partner_report') }}</p></section>
 {% endblock %}

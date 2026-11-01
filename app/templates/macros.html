@@ -2,3 +2,4 @@
 {% macro csrf_field() %}<input type="hidden" name="csrf" value="{{ csrf }}">{% endmacro %}
 {% macro status(s) %}<span class="status st-{{ s|lower }}">{{ t('status_' + s) }}</span>{% endmacro %}
 {% macro err(errors, key) %}{% if errors.get(key) %}<div class="field-error" role="alert">{{ errors[key] }}</div>{% endif %}{% endmacro %}
+{% macro gap(v) %}{% if v is none %}—{% elif v > 0 %}<span class="neg">{{ t('gap_owes') }} <span class="num" dir="ltr">{{ money(v) }}</span></span>{% elif v < 0 %}<span class="ok">{{ t('gap_owed') }} <span class="num" dir="ltr">{{ money(-v) }}</span></span>{% else %}<span class="num" dir="ltr">{{ money(0) }}</span>{% endif %}{% endmacro %}
