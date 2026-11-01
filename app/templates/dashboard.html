@@ -25,7 +25,7 @@
 {% if tb.inventory or tb.payables %}<div class="tile t-inv"><div class="label"><a href="/inventory">{{ t('tile_inventory') }}</a></div><div class="value">{{ m(tb.inventory) }}</div></div>
 <div class="tile t-pay"><div class="label">{{ t('tile_payables') }}</div><div class="value {{ 'neg' if tb.payables > 0 }}">{{ m(tb.payables) }}</div></div>{% endif %}
 <div class="tile t-profit"><div class="label">{{ t('tile_profit') }}</div><div class="value {{ 'neg' if tb.profit < 0 }}">{{ m(tb.profit) }}</div></div>
-<div class="tile t-dist"><div class="label">{{ t('tile_distributable') }}</div><div class="value">{{ m(distributable) }}</div></div>
+<div class="tile t-dist"><div class="label">{{ t('tile_distributable') }}</div><div class="value">{{ m([distributable, 0]|max) }}</div></div>
 </div>
 {% if not (tb.balanced and tb.sheet_ok) %}<div class="flash error" role="alert">{{ t('err_books_not_balanced') }}</div>{% endif %}
 <div class="grid2">

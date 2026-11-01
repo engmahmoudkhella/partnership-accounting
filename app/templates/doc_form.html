@@ -8,7 +8,7 @@
 {% if errors and not errors.get('_') %}<div class="flash error" role="alert" data-testid="form-error">{{ t('err_fix_fields') }}</div>{% endif %}
 {% if extra.get('threshold') %}<p class="note">{{ t('note_threshold') }} {{ m(extra.threshold) }}</p>{% endif %}
 {% if doc_type == 'DISTRIBUTION' and extra.get('distributable') is not none %}
-<div class="note"><b>{{ t('tile_distributable') }}:</b> {{ m(extra.distributable) }}
+<div class="note"><b>{{ t('tile_distributable') }}:</b> {{ m([extra.distributable, 0]|max) }}
 <div class="muted">{{ t('help_distributable') }}</div></div>
 {% endif %}
 <form class="card form" method="post" enctype="multipart/form-data" novalidate data-testid="doc-form">
