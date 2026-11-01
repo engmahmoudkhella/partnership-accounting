@@ -2396,7 +2396,9 @@ class Ledger:
                                                                        ProjectShareVersion.effective_date)):
             own[pv.project_id].append(pv)
         # lines that belong to a project period with its own shares are left out of the general split
-        excluded = [and_(JournalLine.project_id == pid, JournalLine.date >= pvs[0].effective_date)
+        # (project_id IS NOT NULL first: otherwise lines without a project give NULL and drop out of NOT(...))
+        excluded = [and_(JournalLine.project_id.is_not(None), JournalLine.project_id == pid,
+                         JournalLine.date >= pvs[0].effective_date)
                     for pid, pvs in own.items()]
         not_own = not_(or_(*excluded)) if excluded else None
         out: dict[int, int] = defaultdict(int)

@@ -68,3 +68,19 @@ def test_project_share_rules(opened):
     w.L.create_document("DISTRIBUTION", D(12), {"money_account_id": w.cash.id, "amount": 1_000})
     assert code(L.create_project_share_version, w.parcels, D(12), good) == "err_share_date_before_distribution"
     assert code(L.delete_project_share_version, v1) == "err_share_date_before_distribution"
+
+
+def test_profit_without_a_project_is_still_shared_when_a_project_has_its_own_shares(opened):
+    """A NULL project must not drop out of the general split (SQL: NOT (NULL = x) is NULL)."""
+    w = opened
+    L = w.L
+    L.create_project_share_version(w.parcels, D(10), {w.contractor.id: 4_000_000, w.mahmoud.id: 2_666_667,
+                                                      w.momen.id: 1_666_667, w.ahmad.id: 1_666_666}, mode="ratio")
+    sell(w, w.parcels, 12, 100_000)
+    # a general expense (no project) and general income
+    L.create_document("EXPENSE", D(12), {"category": "fees", "amount": 6_000, "money_account_id": w.cash.id})
+    L.create_document("INVOICE", D(12), {"customer_id": w.org.id, "project_id": w.kitchen.id, "quantity": 1000,
+                                         "unit_price": 60_000})
+    w.s.commit()
+    alloc = L.profit_allocation()
+    assert sum(alloc.values()) == L.net_profit() == 100_000 + 60_000 - 6_000
