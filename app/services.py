@@ -1232,7 +1232,7 @@ class Ledger:
         for k, d, amount in rows:
             running[k] += sign * int(amount)
             if running[k] < 0:
-                raise BusinessError(err, id=k, date=d.isoformat(), balance=running[k])
+                raise BusinessError(err, id=k, date=d.isoformat(), balance=running[k], excess=-running[k])
 
     def check_invariants(self):
         """Raise BusinessError if the books are in an impossible state."""

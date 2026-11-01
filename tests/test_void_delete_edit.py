@@ -118,7 +118,7 @@ def test_cannot_void_contribution_whose_money_was_spent(opened):
     with pytest.raises(BusinessError) as e:
         w.L.void_document(c, "خطأ")
     assert e.value.code == "err_insufficient_balance"
-    assert e.value.params == {"id": w.bank.id, "date": "2026-10-03", "balance": -400_000}
+    assert e.value.params == {"id": w.bank.id, "date": "2026-10-03", "balance": -400_000, "excess": 400_000}
     w.s.rollback()
     assert w.s.get(Document, c.id).status == "POSTED"
     assert w.L.balance(CASH, money_account_id=w.bank.id) == 100_000
