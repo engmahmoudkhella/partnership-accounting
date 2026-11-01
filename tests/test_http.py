@@ -660,3 +660,35 @@ def test_monthly_contracts_via_form(ready):
     r = c.post("/contracts/save", {"kind": "income", "name": "خطأ", "amount": "1", "start_date": "2026-10-01",
                                    "months": "1", "project_id": str(ids["project"])}, page="/contracts")
     assert "اختر الجهة" in r.text
+
+
+def test_al_aseel_reports_and_printable_vouchers(ready):
+    c = ready
+    ids = c.ids
+    # a contribution printed as a receipt voucher, amount in words
+    r = c.post("/documents/new/CONTRIBUTION", {"date": "2026-10-05", "partner_id": str(ids["partners"][1]),
+                                               "money_account_id": str(ids["cash"]), "amount": "1,250"},
+               page="/documents/new/CONTRIBUTION")
+    s = c.db()
+    doc = s.scalar(select(Document).where(Document.doc_type == "CONTRIBUTION"))
+    s.close()
+    r = c.get(f"/documents/{doc.id}")
+    assert "سند قبض" in r.text and "رقم القيد" in r.text
+    r = c.get(f"/documents/{doc.id}/print")
+    assert r.status_code == 200 and "سند قبض" in r.text and "فقط ألف ومئتان وخمسون شيكل لا غير" in r.text
+    assert "محمود عدنان خله" in r.text and "المحاسب" in r.text
+    # chart of accounts, general ledger, journal book, trial balance variants
+    cash_code = f"111{ids['cash']:02d}"
+    r = c.get("/reports/accounts")
+    assert cash_code in r.text and "حقوق الملكية" in r.text
+    r = c.get(f"/reports/ledger?code={cash_code}")
+    assert "رصيد" in r.text and "11,250.50" in r.text  # 10,000.50 opening + 1,250
+    r = c.get("/reports/ledger?code=11100&from=2026-10-02")
+    assert "رصيد سابق" in r.text
+    r = c.get("/reports/journal?from=2026-10-01&to=2026-10-31")
+    assert "رقم القيد" in r.text and "11,250.50" in r.text  # period total
+    for q in ("mode=balances", "mode=totals", "mode=both&level=main"):
+        r = c.get("/reports/trial?" + q)
+        assert r.status_code == 200 and "✓" in r.text, q
+    r = c.get("/reports/ledger?code=99999")  # unknown code: just the chooser
+    assert r.status_code == 200

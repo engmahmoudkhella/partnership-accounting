@@ -20,6 +20,7 @@ from sqlalchemy import func, or_, select
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import numbers as N
+from . import chart as COA
 from .db import init_db, make_engine, make_sessionmaker
 from .forms import ATTACHMENT_TYPES, FORM_FIELDS, field_label, parse_date, parse_document_form
 from .i18n import tr
@@ -196,7 +197,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
                         csrf=csrf_token(req), money=money, qty=qty, pct=pct, num=num, fdate=date,
                         flashes=flashes, today=today_fn(), N=N, field_label=field_label,
                         company=ctx.L.get_setting("company_name", ""),
-                        pending_count=_pending_count(ctx))
+                        pending_count=_pending_count(ctx), vk=COA.voucher_kind, code_of=COA.code_of)
         ctx_vars.update(kw)
         return templates.TemplateResponse(req, template, ctx_vars, status_code=status_code)
 
@@ -648,6 +649,22 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
                       linked=linked, asset=asset, can_decide=(doc.status == "PENDING" and ctx.user in ctx.L.approvers()
                                                               and not any(a.user_id == ctx.user.id for a in doc.approvals)),
                       locked=ctx.L.is_locked(doc.date))
+
+    def coa_names(ctx: Ctx) -> dict[str, str]:
+        names = COA.leaf_names(ctx.s, ctx.t)
+        names.update({c: ctx.t("coa_" + c) for c, _p, _n in COA.GROUPS})
+        return names
+
+    @app.get("/documents/{doc_id:int}/print", response_class=HTMLResponse)
+    @page
+    async def doc_print(ctx: Ctx, doc_id: int):
+        require(ctx)
+        doc = get_or_404(ctx, Document, doc_id)
+        asset = ctx.s.get(Asset, doc.asset_id) if doc.asset_id else None
+        cash_amount = doc.amount - (doc.fee or 0) if doc.doc_type == "RECEIPT" else doc.amount
+        return render(ctx, "print_voucher.html", doc=doc, names=_names(ctx), coa=coa_names(ctx), asset=asset,
+                      kind=COA.voucher_kind(doc), words=N.amount_in_words(doc.amount, ctx.lang),
+                      cash_amount=cash_amount, now=dt.datetime.now().strftime("%Y-%m-%d %H:%M"))
 
     @app.get("/documents/{doc_id:int}/edit", response_class=HTMLResponse)
     @page
@@ -1150,8 +1167,59 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     @page
     async def report_trial(ctx: Ctx):
         require(ctx)
+        q = ctx.request.query_params
+        as_of = opt_date(q.get("as_of"))
+        mode = q.get("mode") if q.get("mode") in ("balances", "totals", "both") else "balances"
+        level = q.get("level") if q.get("level") in ("leaf", "main") else "leaf"
+        full = COA.build_chart(ctx.s, ctx.t, end=as_of, only_used=True)
+        nodes = [n for n in full if n.group] if level == "main" else full
+        leaves = [n for n in full if not n.group]
+        sums = {"td": sum(n.total_debit for n in leaves), "tc": sum(n.total_credit for n in leaves),
+                "bd": sum(n.balance for n in leaves if n.balance > 0),
+                "bc": sum(-n.balance for n in leaves if n.balance < 0)}
+        return render(ctx, "report_trial.html", tb=ctx.L.trial_balance(as_of), as_of=as_of, nodes=nodes,
+                      mode=mode, level=level, sums=sums)
+
+    @app.get("/reports/accounts", response_class=HTMLResponse)
+    @page
+    async def report_accounts(ctx: Ctx):
+        require(ctx)
         as_of = opt_date(ctx.request.query_params.get("as_of"))
-        return render(ctx, "report_trial.html", tb=ctx.L.trial_balance(as_of), as_of=as_of)
+        return render(ctx, "report_accounts.html", nodes=COA.build_chart(ctx.s, ctx.t, end=as_of), as_of=as_of)
+
+    @app.get("/reports/ledger", response_class=HTMLResponse)
+    @page
+    async def report_ledger(ctx: Ctx):
+        require(ctx)
+        q = ctx.request.query_params
+        d1, d2 = opt_date(q.get("from")), opt_date(q.get("to"))
+        project = safe_id(q.get("project"))
+        nodes = COA.build_chart(ctx.s, ctx.t)
+        codes = {n.code for n in nodes}
+        code = q.get("code") if q.get("code") in codes else None
+        data = COA.account_ledger(ctx.s, code, d1, d2, project) if code else None
+        return render(ctx, "report_ledger.html", nodes=nodes, code=code, data=data, d1=d1, d2=d2,
+                      project=project, names=_names(ctx), coa=coa_names(ctx),
+                      projects=list(ctx.s.scalars(select(Project).order_by(Project.id))))
+
+    @app.get("/reports/journal", response_class=HTMLResponse)
+    @page
+    async def report_journal(ctx: Ctx):
+        require(ctx)
+        q = ctx.request.query_params
+        d1, d2 = opt_date(q.get("from")), opt_date(q.get("to"))
+        if d1 is None and d2 is None:  # default: this month
+            t = ctx.L.today
+            d1, d2 = t.replace(day=1), t
+        stmt = select(Document).where(Document.status == "POSTED")
+        if d1:
+            stmt = stmt.where(Document.date >= d1)
+        if d2:
+            stmt = stmt.where(Document.date <= d2)
+        docs = [d for d in ctx.s.scalars(stmt.order_by(Document.date, Document.id)) if d.lines]
+        total = sum(ln.debit for d in docs for ln in d.lines)
+        return render(ctx, "report_journal.html", docs=docs, d1=d1, d2=d2, total=total, names=_names(ctx),
+                      coa=coa_names(ctx))
 
     @app.get("/reports/projects", response_class=HTMLResponse)
     @page

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import m, status with context %}
+{% from "macros.html" import m, status, vlabel with context %}
 {% block title %}{{ t('nav_documents') }}{% endblock %}
 {% block content %}
 <h1>{{ t('nav_documents') }}</h1>
@@ -18,7 +18,7 @@
 <div class="scroll"><table data-testid="documents-table"><thead><tr><th>{{ t('f_date') }}</th><th>{{ t('col_type') }}</th><th>{{ t('col_number') }}</th><th>{{ t('col_details') }}</th><th>{{ t('f_description') }}</th><th class="n">{{ t('f_amount') }}</th><th>{{ t('col_status') }}</th></tr></thead><tbody>
 {% for d in docs %}<tr class="{{ 'void' if d.status == 'VOID' }}">
 <td><span class="num" dir="ltr">{{ fdate(d.date) }}</span></td>
-<td><a href="/documents/{{ d.id }}">{{ t('doc_' + d.doc_type) }}</a></td>
+<td><a href="/documents/{{ d.id }}">{{ t('doc_' + d.doc_type) }}</a><br>{{ vlabel(d) }}</td>
 <td><span class="num">{{ num(d.number) }}</span></td>
 <td>{{ names.partner.get(d.partner_id) or names.partner.get(d.paid_by_partner_id) or names.customer.get(d.customer_id) or '' }}{% if d.project_id %} · {{ names.project.get(d.project_id) }}{% endif %}{% if d.category %} · {{ t('cat_' + d.category) }}{% endif %}</td>
 <td>{{ d.description }}</td>

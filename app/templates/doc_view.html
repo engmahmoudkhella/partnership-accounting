@@ -1,8 +1,10 @@
 {% extends "base.html" %}
-{% from "macros.html" import m, status, csrf_field with context %}
+{% from "macros.html" import m, status, csrf_field, vlabel with context %}
 {% block title %}{{ t('doc_' + doc.doc_type) }} #{{ doc.number }}{% endblock %}
 {% block content %}
 <h1>{{ t('doc_' + doc.doc_type) }} <span class="num">#{{ num(doc.number) }}</span> {{ status(doc.status) }}</h1>
+<p class="voucher-line">{{ vlabel(doc) }} · {{ t('voucher_no') }} <b class="num">{{ num(doc.number) }}</b>{% if doc.lines %} · {{ t('entry_no') }} <b class="num" data-testid="entry-no">{{ num(doc.id) }}</b>{% endif %}
+<a class="btn small" href="/documents/{{ doc.id }}/print" target="_blank" data-testid="print-voucher">🖨 {{ t('btn_print_voucher') }}</a></p>
 {% if locked %}<div class="note">🔒 {{ t('msg_month_locked_doc') }}</div>{% endif %}
 {% if doc.status == 'VOID' %}<div class="flash error">{{ t('msg_voided_by') }} {{ names.user.get(doc.voided_by, '') }} · {{ doc.voided_at.strftime('%Y-%m-%d %H:%M') if doc.voided_at }} — {{ doc.void_reason }}</div>{% endif %}
 <div class="grid2">
@@ -35,8 +37,8 @@
 <section class="card">
 <h2>{{ t('journal') }}</h2>
 {% if doc.lines %}
-<table data-testid="journal"><thead><tr><th>{{ t('col_account') }}</th><th>{{ t('col_details') }}</th><th class="n">{{ t('col_debit') }}</th><th class="n">{{ t('col_credit') }}</th></tr></thead><tbody>
-{% for ln in doc.lines %}<tr><td>{{ t('acc_' + ln.account) }}</td><td>{{ names.money_account.get(ln.money_account_id) or names.partner.get(ln.partner_id) or names.customer.get(ln.customer_id) or names.asset.get(ln.asset_id) or '' }}{% if ln.category %} · {{ t('cat_' + ln.category) }}{% endif %}</td><td class="n">{% if ln.debit %}{{ m(ln.debit) }}{% endif %}</td><td class="n">{% if ln.credit %}{{ m(ln.credit) }}{% endif %}</td></tr>{% endfor %}
+<table data-testid="journal"><thead><tr><th>{{ t('col_code') }}</th><th>{{ t('col_account') }}</th><th>{{ t('col_details') }}</th><th class="n">{{ t('col_debit') }}</th><th class="n">{{ t('col_credit') }}</th></tr></thead><tbody>
+{% for ln in doc.lines|sort(attribute='credit') %}<tr><td><span class="num" dir="ltr">{{ code_of(ln) }}</span></td><td>{{ t('acc_' + ln.account) }}</td><td>{{ names.money_account.get(ln.money_account_id) or names.partner.get(ln.partner_id) or names.customer.get(ln.customer_id) or names.asset.get(ln.asset_id) or '' }}{% if ln.category %} · {{ t('cat_' + ln.category) }}{% endif %}</td><td class="n">{% if ln.debit %}{{ m(ln.debit) }}{% endif %}</td><td class="n">{% if ln.credit %}{{ m(ln.credit) }}{% endif %}</td></tr>{% endfor %}
 </tbody></table>
 {% else %}<p class="muted">{{ t('journal_none_' + ('memo' if doc.doc_type in ('CAPITAL_CALL','PRODUCTION') else doc.status|lower)) }}</p>{% endif %}
 

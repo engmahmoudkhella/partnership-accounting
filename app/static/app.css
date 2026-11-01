@@ -173,3 +173,20 @@ pre{white-space:pre-wrap;font-size:.8rem;max-width:520px}
 .card .card{border:0;box-shadow:none;padding:0;margin:0;background:none}
 .nowrap{white-space:nowrap}
 .nowrap .field-error{white-space:normal;min-width:14rem}
+/* Al-Aseel style: voucher families, chart of accounts, journal book */
+.vk{display:inline-block;font-size:.75rem;font-weight:600;padding:0 .5rem;border-radius:6px;border:1px solid;white-space:nowrap}
+.vk-receipt{color:#11734b;border-color:#a8dab5;background:#f0faf4}
+.vk-payment{color:#b42318;border-color:#f4b4ae;background:#fff5f4}
+.vk-journal{color:#0f6b8f;border-color:#b9dcea;background:#f1f8fb}
+.vk-invoice{color:#a15c00;border-color:#f3d39c;background:#fff8ec}
+.vk-memo{color:#6b7686;border-color:#d3d9e2;background:#f8fafc}
+.voucher-line{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin:-.5rem 0 1rem;color:var(--ink2)}
+.voucher-line .btn{margin-inline-start:auto}
+.bal-d{color:#1d4ed8;font-weight:700;font-size:.8rem}.bal-c{color:var(--bad);font-weight:700;font-size:.8rem}
+table.coa tr.grp td{font-weight:700;background:#f8fafc}
+table.coa tr.lvl-1 .coa-name{padding-inline-start:1.6rem}
+table.coa tr.lvl-2 .coa-name{padding-inline-start:3rem}
+table.coa tr.lvl-3 .coa-name{padding-inline-start:4.4rem}
+table.journal-book tr.entry-head td{background:#f1f5f9;border-top:2px solid var(--line2)}
+table.journal-book tr.cr td.jn{padding-inline-start:2rem}
+@media print{.subnav,.voucher-line .btn{display:none!important}main{max-width:none;padding:0}.scroll{overflow:visible}table{font-size:11px}}

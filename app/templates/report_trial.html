@@ -4,12 +4,20 @@
 {% block content %}
 {% include "_reports_nav.html" %}
 <h1>{{ t('rep_trial') }}</h1>
-<form class="filters"><label class="inline">{{ t('as_of') }} <input type="date" name="as_of" value="{{ as_of.isoformat() if as_of else '' }}"></label><button>{{ t('btn_filter') }}</button></form>
-<div class="grid2">
-<section class="card"><table data-testid="trial"><thead><tr><th>{{ t('col_account') }}</th><th class="n">{{ t('col_debit') }}</th><th class="n">{{ t('col_credit') }}</th></tr></thead><tbody>
-{% for acc in ['1100','1200','1500','3100','3200','4100','4900','5100','5900'] %}{% set r = tb.rows.get(acc, (0,0)) %}<tr><td>{{ acc }} · {{ t('acc_' + acc) }}</td><td class="n">{{ m(r[0]) }}</td><td class="n">{{ m(r[1]) }}</td></tr>{% endfor %}
-</tbody><tfoot><tr><th>{{ t('total') }}</th><th class="n">{{ m(tb.total_debit) }}</th><th class="n">{{ m(tb.total_credit) }}</th></tr></tfoot></table>
-<p class="{{ 'ok' if tb.balanced else 'neg' }}" data-testid="trial-status">{{ t('trial_ok') if tb.balanced else t('err_books_not_balanced') }}</p></section>
+<form class="filters"><label class="inline">{{ t('as_of') }} <input type="date" name="as_of" value="{{ as_of.isoformat() if as_of else '' }}"></label>
+<select name="mode" aria-label="{{ t('tb_mode') }}" data-testid="tb-mode">{% for k in ['balances','totals','both'] %}<option value="{{ k }}" {{ 'selected' if mode == k }}>{{ t('tb_' + k) }}</option>{% endfor %}</select>
+<select name="level" aria-label="{{ t('tb_level') }}">{% for k in ['leaf','main'] %}<option value="{{ k }}" {{ 'selected' if level == k }}>{{ t('tb_level_' + k) }}</option>{% endfor %}</select>
+<button>{{ t('btn_filter') }}</button><button type="button" onclick="window.print()">{{ t('btn_print') }}</button></form>
+<section class="card"><div class="scroll"><table class="coa" data-testid="trial"><thead><tr><th>{{ t('col_code') }}</th><th>{{ t('col_account_name') }}</th>
+{% if mode in ('totals','both') %}<th class="n">{{ t('col_total_debit') }}</th><th class="n">{{ t('col_total_credit') }}</th>{% endif %}
+{% if mode in ('balances','both') %}<th class="n">{{ t('col_balance_debit') }}</th><th class="n">{{ t('col_balance_credit') }}</th>{% endif %}</tr></thead><tbody>
+{% for n in nodes %}<tr class="{{ 'grp' if n.group }} lvl-{{ n.level }}"><td><span class="num" dir="ltr">{{ n.code }}</span></td><td class="coa-name"><a href="/reports/ledger?code={{ n.code }}{% if as_of %}&to={{ as_of.isoformat() }}{% endif %}">{{ n.name }}</a></td>
+{% if mode in ('totals','both') %}<td class="n">{{ m(n.total_debit) }}</td><td class="n">{{ m(n.total_credit) }}</td>{% endif %}
+{% if mode in ('balances','both') %}<td class="n">{% if n.balance > 0 %}{{ m(n.balance) }}{% endif %}</td><td class="n">{% if n.balance < 0 %}{{ m(-n.balance) }}{% endif %}</td>{% endif %}</tr>{% endfor %}
+</tbody><tfoot><tr><th colspan="2">{{ t('total') }}</th>
+{% if mode in ('totals','both') %}<th class="n">{{ m(sums.td) }}</th><th class="n">{{ m(sums.tc) }}</th>{% endif %}
+{% if mode in ('balances','both') %}<th class="n" data-testid="tb-bd">{{ m(sums.bd) }}</th><th class="n" data-testid="tb-bc">{{ m(sums.bc) }}</th>{% endif %}</tr></tfoot></table></div>
+<p class="{{ 'ok' if tb.balanced and sums.bd == sums.bc else 'neg' }}" data-testid="trial-status">{{ t('trial_ok') if tb.balanced and sums.bd == sums.bc else t('err_books_not_balanced') }}</p></section>
 <section class="card"><h2>{{ t('balance_sheet') }}</h2><table class="kv" data-testid="sheet">
 <tr><th>{{ t('acc_1100') }}</th><td class="n">{{ m(tb.cash) }}</td></tr>
 <tr><th>{{ t('acc_1200') }}</th><td class="n">{{ m(tb.receivable) }}</td></tr>
@@ -20,5 +28,4 @@
 <tr><th>− {{ t('acc_3200') }}</th><td class="n">{{ m(tb.distributions) }}</td></tr>
 <tr class="total"><th>{{ t('total_equity') }}</th><td class="n">{{ m(tb.equity) }}</td></tr>
 </table><p class="{{ 'ok' if tb.sheet_ok else 'neg' }}">{{ t('sheet_ok') if tb.sheet_ok else t('err_books_not_balanced') }}</p></section>
-</div>
 {% endblock %}

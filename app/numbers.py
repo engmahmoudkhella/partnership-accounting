@@ -290,3 +290,101 @@ def allocate(amount: int, weights: list[tuple[object, int]], tie_offset: int = 0
     for p in sorted(parts, key=lambda p: (-p[2], (p[3] - tie_offset) % n))[:left]:
         p[1] += 1
     return {p[0]: sign * p[1] for p in parts}
+
+
+# ------------------------------------------------------------------ amount in words (تفقيط)
+
+_AR_ONES = ["", "واحد", "اثنان", "ثلاثة", "أربعة", "خمسة", "ستة", "سبعة", "ثمانية", "تسعة"]
+_AR_TEENS = ["عشرة", "أحد عشر", "اثنا عشر", "ثلاثة عشر", "أربعة عشر", "خمسة عشر", "ستة عشر", "سبعة عشر",
+             "ثمانية عشر", "تسعة عشر"]
+_AR_TENS = ["", "", "عشرون", "ثلاثون", "أربعون", "خمسون", "ستون", "سبعون", "ثمانون", "تسعون"]
+_AR_HUNDREDS = ["", "مئة", "مئتان", "ثلاثمئة", "أربعمئة", "خمسمئة", "ستمئة", "سبعمئة", "ثمانمئة", "تسعمئة"]
+# (one, two, 3-10 plural, 11+ singular)
+_AR_SCALES = [("ألف", "ألفان", "آلاف", "ألف"), ("مليون", "مليونان", "ملايين", "مليون"),
+              ("مليار", "ملياران", "مليارات", "مليار")]
+
+
+def _ar_below_1000(n: int) -> str:
+    h, r = divmod(n, 100)
+    parts = []
+    if h:
+        parts.append(_AR_HUNDREDS[h])
+    if r:
+        if r < 10:
+            parts.append(_AR_ONES[r])
+        elif r < 20:
+            parts.append(_AR_TEENS[r - 10])
+        else:
+            t, o = divmod(r, 10)
+            parts.append((_AR_ONES[o] + " و" if o else "") + _AR_TENS[t])
+    return " و".join(parts)
+
+
+def number_to_arabic_words(n: int) -> str:
+    if n == 0:
+        return "صفر"
+    groups = []
+    while n:
+        n, g = divmod(n, 1000)
+        groups.append(g)
+    parts = []
+    for i in range(len(groups) - 1, -1, -1):
+        g = groups[i]
+        if not g:
+            continue
+        if i == 0:
+            parts.append(_ar_below_1000(g))
+            continue
+        one, two, plural, single = _AR_SCALES[i - 1]
+        if g == 1:
+            parts.append(one)
+        elif g == 2:
+            parts.append(two)
+        elif 3 <= g <= 10:
+            parts.append(f"{_ar_below_1000(g)} {plural}")
+        else:
+            parts.append(f"{_ar_below_1000(g)} {single}")
+    return " و".join(parts)
+
+
+_EN_ONES = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+            "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"]
+_EN_TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+
+
+def number_to_english_words(n: int) -> str:
+    if n == 0:
+        return "zero"
+
+    def below_1000(x):
+        h, r = divmod(x, 100)
+        out = []
+        if h:
+            out.append(_EN_ONES[h] + " hundred")
+        if r:
+            out.append(_EN_ONES[r] if r < 20 else _EN_TENS[r // 10] + ("-" + _EN_ONES[r % 10] if r % 10 else ""))
+        return " ".join(out)
+
+    parts, scales = [], ["", " thousand", " million", " billion"]
+    i = 0
+    while n:
+        n, g = divmod(n, 1000)
+        if g:
+            parts.insert(0, below_1000(g) + scales[i])
+        i += 1
+    return " ".join(parts)
+
+
+def amount_in_words(minor: int, lang: str = "ar") -> str:
+    """Shekels and agorot in words, the way receipts are written: «فقط ... شيكل و... أغورة لا غير»."""
+    minor = abs(int(minor or 0))
+    shekels, agorot = divmod(minor, 100)
+    if lang == "ar":
+        s = f"فقط {number_to_arabic_words(shekels)} شيكل"
+        if agorot:
+            s += f" و{number_to_arabic_words(agorot)} أغورة"
+        return s + " لا غير"
+    s = f"{number_to_english_words(shekels)} shekels"
+    if agorot:
+        s += f" and {number_to_english_words(agorot)} agorot"
+    return s[0].upper() + s[1:] + " only"

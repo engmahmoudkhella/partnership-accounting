@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% from "macros.html" import m, bal, vlabel with context %}
+{% block title %}{{ t('rep_ledger') }}{% endblock %}
+{% block content %}
+{% include "_reports_nav.html" %}
+<h1>{{ t('rep_ledger') }}{% if code %}: <span class="num" dir="ltr">{{ code }}</span> {{ coa.get(code, '') }}{% endif %}</h1>
+<form class="filters" data-testid="ledger-form">
+<select name="code" data-testid="ledger-code" required><option value="">{{ t('choose_account') }}</option>{% for n in nodes %}<option value="{{ n.code }}" {{ 'selected' if n.code == code }}>{{ n.code }} · {{ n.name }}</option>{% endfor %}</select>
+<label class="inline">{{ t('from') }} <input type="date" name="from" value="{{ d1.isoformat() if d1 else '' }}"></label>
+<label class="inline">{{ t('to') }} <input type="date" name="to" value="{{ d2.isoformat() if d2 else '' }}"></label>
+<select name="project"><option value="">{{ t('col_project_short') }}: —</option>{% for p in projects %}<option value="{{ p.id }}" {{ 'selected' if project == p.id }}>{{ p.name }}</option>{% endfor %}</select>
+<button>{{ t('btn_filter') }}</button>{% if data %}<button type="button" onclick="window.print()">{{ t('btn_print') }}</button>{% endif %}
+</form>
+{% if data %}
+<section class="card"><div class="scroll"><table data-testid="ledger"><thead><tr><th>{{ t('f_date') }}</th><th>{{ t('entry_no') }}</th><th>{{ t('col_voucher') }}</th><th>{{ t('f_description') }}</th>{% if code in ['10000','11000','11100','11200','12000','30000','31000','32000','40000','50000','51000'] %}<th>{{ t('col_account_name') }}</th>{% endif %}<th>{{ t('col_project_short') }}</th><th class="n">{{ t('col_debit') }}</th><th class="n">{{ t('col_credit') }}</th><th class="n">{{ t('col_balance') }}</th></tr></thead><tbody>
+{% set grp = code in ['10000','11000','11100','11200','12000','30000','31000','32000','40000','50000','51000'] %}
+{% if d1 %}<tr class="total"><td colspan="{{ 7 if grp else 6 }}">{{ t('opening_balance') }}</td><td></td><td class="n">{{ bal(data.opening) }}</td></tr>{% endif %}
+{% for r in data.rows %}{% set d = r.doc %}<tr><td class="nowrap"><span class="num" dir="ltr">{{ fdate(r.line.date) }}</span></td><td><a href="/documents/{{ d.id }}"><span class="num">{{ num(d.id) }}</span></a></td><td>{{ vlabel(d) }} <span class="num">{{ num(d.number) }}</span><br><small class="muted">{{ t('doc_' + d.doc_type) }}</small></td><td>{{ d.description }}</td>{% if grp %}<td><span class="num" dir="ltr">{{ r.code }}</span> {{ coa.get(r.code, '') }}</td>{% endif %}<td>{{ names.project.get(r.line.project_id, '') }}</td><td class="n">{% if r.line.debit %}{{ m(r.line.debit) }}{% endif %}</td><td class="n">{% if r.line.credit %}{{ m(r.line.credit) }}{% endif %}</td><td class="n">{{ bal(r.balance) }}</td></tr>
+{% else %}<tr><td colspan="9" class="muted">{{ t('empty') }}</td></tr>{% endfor %}
+</tbody><tfoot><tr><th colspan="{{ 6 if grp else 5 }}">{{ t('closing_balance') }}</th><th class="n">{{ m(data.total_debit) }}</th><th class="n">{{ m(data.total_credit) }}</th><th class="n" data-testid="ledger-closing">{{ bal(data.closing) }}</th></tr></tfoot></table></div></section>
+{% endif %}
+{% endblock %}

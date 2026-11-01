@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% from "macros.html" import bal with context %}
+{% block title %}{{ t('rep_accounts') }}{% endblock %}
+{% block content %}
+{% include "_reports_nav.html" %}
+<h1>{{ t('rep_accounts') }}</h1>
+<p class="muted">{{ t('help_accounts') }}</p>
+<form class="filters"><label class="inline">{{ t('as_of') }} <input type="date" name="as_of" value="{{ as_of.isoformat() if as_of else '' }}"></label><button>{{ t('btn_filter') }}</button><button type="button" onclick="window.print()">{{ t('btn_print') }}</button></form>
+<section class="card"><div class="scroll"><table class="coa" data-testid="coa"><thead><tr><th>{{ t('col_code') }}</th><th>{{ t('col_account_name') }}</th><th>{{ t('col_nature') }}</th><th class="n">{{ t('col_balance') }}</th></tr></thead><tbody>
+{% for n in nodes %}<tr class="{{ 'grp' if n.group }} lvl-{{ n.level }}"><td><span class="num" dir="ltr">{{ n.code }}</span></td><td class="coa-name"><a href="/reports/ledger?code={{ n.code }}">{{ n.name }}</a></td><td>{{ t('nature_' + n.nature) }}</td><td class="n">{{ bal(n.balance) }}</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endblock %}

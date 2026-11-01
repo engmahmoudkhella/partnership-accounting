@@ -201,6 +201,29 @@ async function waitForServer() {
     check((await page.textContent("[data-testid=trial-status]")).includes("✓"), "trial balance still balanced");
     await page.goto(BASE + "/");
 
+    console.log("9c. Al-Aseel style: vouchers, chart of accounts, ledger, journal book");
+    await page.goto(expenseUrl);
+    check((await page.textContent(".voucher-line")).includes("سند صرف"), "expense shows as a payment voucher");
+    const [pr] = await Promise.all([page.context().waitForEvent("page"), page.click("[data-testid=print-voucher]")]);
+    await pr.waitForLoadState();
+    check((await pr.textContent("[data-testid=voucher-title]")).includes("سند صرف"), "printable payment voucher");
+    check((await pr.textContent("[data-testid=voucher-words]")).includes("فقط"), "amount written in words");
+    await pr.screenshot({ path: path.join(SHOTS, "11-voucher-print.png"), fullPage: true });
+    await pr.close();
+    await page.goto(BASE + "/reports/accounts");
+    check((await page.textContent("[data-testid=coa]")).includes("11100"), "chart of accounts with numbers");
+    await page.screenshot({ path: path.join(SHOTS, "12-chart-of-accounts.png"), fullPage: true });
+    await page.click("text=النقدية والبنوك");
+    check((await page.locator("[data-testid=ledger] tbody tr").count()) > 0, "general ledger opens from the chart");
+    await page.screenshot({ path: path.join(SHOTS, "13-ledger.png"), fullPage: true });
+    await page.goto(BASE + "/reports/journal");
+    check((await page.locator("tr.entry-head").count()) > 0, "journal book lists entries");
+    await page.screenshot({ path: path.join(SHOTS, "14-journal.png"), fullPage: true });
+    await page.goto(BASE + "/reports/trial?mode=both");
+    check((await page.textContent("[data-testid=trial-status]")).includes("✓"), "trial balance (totals and balances) balanced");
+    await page.screenshot({ path: path.join(SHOTS, "15-trial.png"), fullPage: true });
+    await page.goto(BASE + "/");
+
     console.log("10. Switch to English");
     await page.click("[data-testid=lang-switch]");
     check((await page.getAttribute("html", "dir")) === "ltr", "English page is left-to-right");

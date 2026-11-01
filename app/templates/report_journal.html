@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% from "macros.html" import m, vlabel with context %}
+{% block title %}{{ t('rep_journal') }}{% endblock %}
+{% block content %}
+{% include "_reports_nav.html" %}
+<h1>{{ t('rep_journal') }}</h1>
+<form class="filters"><label class="inline">{{ t('from') }} <input type="date" name="from" value="{{ d1.isoformat() if d1 else '' }}"></label>
+<label class="inline">{{ t('to') }} <input type="date" name="to" value="{{ d2.isoformat() if d2 else '' }}"></label>
+<button>{{ t('btn_filter') }}</button><button type="button" onclick="window.print()">{{ t('btn_print') }}</button></form>
+<section class="card"><div class="scroll"><table class="journal-book" data-testid="journal-book"><thead><tr><th>{{ t('col_code') }}</th><th>{{ t('col_account_name') }}</th><th>{{ t('col_project_short') }}</th><th class="n">{{ t('col_debit') }}</th><th class="n">{{ t('col_credit') }}</th></tr></thead>
+{% for d in docs %}<tbody class="entry">
+<tr class="entry-head"><td colspan="5"><b>{{ t('entry_no') }} <a href="/documents/{{ d.id }}"><span class="num">{{ num(d.id) }}</span></a></b> · <span class="num" dir="ltr">{{ fdate(d.date) }}</span> · {{ vlabel(d) }} <span class="num">{{ num(d.number) }}</span> ({{ t('doc_' + d.doc_type) }}){% if d.description %} — {{ d.description }}{% endif %}</td></tr>
+{% for ln in d.lines|sort(attribute='credit') %}{% set c = code_of(ln) %}<tr class="{{ 'cr' if ln.credit }}"><td><span class="num" dir="ltr">{{ c }}</span></td><td class="jn">{{ coa.get(c, c) }}</td><td>{{ names.project.get(ln.project_id, '') }}</td><td class="n">{% if ln.debit %}{{ m(ln.debit) }}{% endif %}</td><td class="n">{% if ln.credit %}{{ m(ln.credit) }}{% endif %}</td></tr>{% endfor %}
+</tbody>{% else %}<tbody><tr><td colspan="5" class="muted">{{ t('empty') }}</td></tr></tbody>{% endfor %}
+<tfoot><tr><th colspan="3">{{ t('journal_period_total') }}</th><th class="n" data-testid="journal-total">{{ m(total) }}</th><th class="n">{{ m(total) }}</th></tr></tfoot></table></div></section>
+{% endblock %}

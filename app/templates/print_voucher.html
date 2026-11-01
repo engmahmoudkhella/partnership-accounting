@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="{{ lang }}" dir="{{ dir }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ t('vk_' + kind) }} {{ doc.number }} · {{ company or t('app_name') }}</title>
+<style>
+  @page{size:A5 landscape;margin:10mm}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI","Noto Sans Arabic",Tahoma,Arial,sans-serif;color:#111;background:#e9edf2;font-size:13px}
+  .bar{display:flex;gap:.5rem;justify-content:center;padding:.8rem}
+  .bar button,.bar a{font:inherit;padding:.45rem 1.1rem;border-radius:8px;border:1px solid #9aa5b1;background:#fff;color:#111;text-decoration:none;cursor:pointer}
+  .bar .primary{background:#0f6b8f;color:#fff;border-color:#0f6b8f}
+  .sheet{position:relative;width:210mm;max-width:100%;min-height:140mm;margin:0 auto 1rem;background:#fff;padding:9mm 10mm;box-shadow:0 2px 12px rgba(0,0,0,.12);overflow:hidden}
+  .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:4mm;margin-bottom:4mm}
+  .co{font-size:18px;font-weight:800}
+  .title{text-align:center}
+  .title h1{margin:0;font-size:22px;letter-spacing:.02em}
+  .title .sub{color:#555;font-size:12px}
+  .meta{text-align:end;line-height:1.7}
+  .meta b{display:inline-block;min-width:22mm;border-bottom:1px dotted #777;text-align:center}
+  .amount-box{display:inline-block;border:2px solid #111;border-radius:6px;padding:2mm 5mm;font-size:18px;font-weight:800;direction:ltr}
+  .row{display:flex;gap:4mm;align-items:baseline;margin:3.2mm 0}
+  .row .k{white-space:nowrap;font-weight:700;min-width:28mm}
+  .row .v{flex:1;border-bottom:1px dotted #777;padding:0 2mm 1mm;min-height:6mm}
+  table{width:100%;border-collapse:collapse;margin-top:3mm;font-size:12px}
+  th,td{border:1px solid #444;padding:1.5mm 2mm;text-align:start}
+  th{background:#f0f0f0}
+  td.n,th.n{text-align:end;white-space:nowrap;direction:ltr}
+  .num{font-variant-numeric:tabular-nums;unicode-bidi:isolate}
+  .sigs{display:flex;justify-content:space-between;gap:6mm;margin-top:12mm}
+  .sigs div{flex:1;text-align:center;border-top:1px solid #111;padding-top:1.5mm;font-weight:700}
+  .foot{margin-top:6mm;color:#666;font-size:10px;display:flex;justify-content:space-between}
+  .wm{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
+  .wm span{transform:rotate(-24deg);font-size:72px;font-weight:900;color:rgba(180,35,24,.16);border:8px solid rgba(180,35,24,.16);padding:2mm 10mm;border-radius:12px}
+  @media print{body{background:#fff}.bar{display:none}.sheet{box-shadow:none;margin:0;width:auto;min-height:0;padding:0}}
+</style>
+</head>
+<body>
+<div class="bar"><button class="primary" onclick="window.print()">{{ t('btn_print') }}</button><a href="/documents/{{ doc.id }}">{{ t('btn_cancel') }}</a></div>
+<div class="sheet" data-testid="voucher">
+  {% if doc.status == 'VOID' %}<div class="wm"><span>{{ t('wm_void') }}</span></div>{% elif doc.status != 'POSTED' %}<div class="wm"><span>{{ t('wm_pending') }}</span></div>{% endif %}
+  <div class="head">
+    <div><div class="co">{{ company or t('app_name') }}</div></div>
+    <div class="title"><h1 data-testid="voucher-title">{{ t('vk_' + kind) }}</h1><div class="sub">{{ t('doc_' + doc.doc_type) }}</div></div>
+    <div class="meta">
+      {{ t('voucher_no') }}: <b class="num">{{ num(doc.number) }}</b><br>
+      {{ t('f_date') }}: <b class="num" dir="ltr">{{ fdate(doc.date) }}</b><br>
+      {% if doc.lines %}{{ t('entry_no') }}: <b class="num">{{ num(doc.id) }}</b>{% endif %}
+    </div>
+  </div>
+
+  {% if kind in ('receipt', 'payment') %}
+  <div class="row"><span class="k">{{ t('the_sum_of') }}</span><span class="amount-box num" data-testid="voucher-amount">{{ money(doc.amount) }} ₪</span></div>
+  <div class="row"><span class="k">{{ t('received_from') if kind == 'receipt' else t('paid_to') }}</span><span class="v">
+    {%- if doc.doc_type == 'CONTRIBUTION' -%}{{ names.partner.get(doc.partner_id, '') }}
+    {%- elif doc.doc_type == 'RECEIPT' -%}{{ names.customer.get(doc.customer_id, '') }}
+    {%- elif doc.doc_type == 'DISTRIBUTION' -%}{{ t('partners_distribution') }}
+    {%- else -%}{{ doc.supplier or '' }}{%- endif -%}</span></div>
+  <div class="row"><span class="k"></span><span class="v" data-testid="voucher-words">{{ words }}</span></div>
+  <div class="row"><span class="k">{{ t('for_the_reason') }}</span><span class="v">
+    {%- if doc.description %}{{ doc.description }}{% else %}{{ t('doc_' + doc.doc_type) }}{% endif -%}
+    {%- if doc.category %} · {{ t('cat_' + doc.category) }}{% endif -%}
+    {%- if asset %} · {{ asset.name }}{% endif -%}
+    {%- if doc.project_id %} · {{ names.project.get(doc.project_id, '') }}{% endif %}</span></div>
+  <div class="row"><span class="k">{{ t('into_account') if kind == 'receipt' else t('out_of_account') }}</span><span class="v">{{ names.money_account.get(doc.money_account_id, '') }}{% if doc.fee %} — {{ t('f_fee') }}: <span class="num" dir="ltr">{{ money(doc.fee) }}</span>, {{ t('f_amount') }}: <span class="num" dir="ltr">{{ money(cash_amount) }}</span>{% endif %}</span></div>
+  {% else %}
+  <div class="row"><span class="k">{{ t('f_description') }}</span><span class="v">{{ doc.description or t('doc_' + doc.doc_type) }}{% if doc.customer_id %} · {{ names.customer.get(doc.customer_id, '') }}{% endif %}{% if doc.project_id %} · {{ names.project.get(doc.project_id, '') }}{% endif %}</span></div>
+  {% if doc.amount %}<div class="row"><span class="k">{{ t('f_amount') }}</span><span class="v"><b class="num" dir="ltr">{{ money(doc.amount) }} ₪</b> — {{ words }}</span></div>{% endif %}
+  {% endif %}
+
+  {% if doc.lines %}
+  <table data-testid="voucher-lines"><thead><tr><th>{{ t('col_code') }}</th><th>{{ t('col_account_name') }}</th><th>{{ t('col_project_short') }}</th><th class="n">{{ t('col_debit') }}</th><th class="n">{{ t('col_credit') }}</th></tr></thead><tbody>
+  {% for ln in doc.lines|sort(attribute='credit') %}{% set c = code_of(ln) %}<tr><td class="num">{{ c }}</td><td>{{ coa.get(c, c) }}</td><td>{{ names.project.get(ln.project_id, '') }}</td><td class="n">{% if ln.debit %}{{ money(ln.debit) }}{% endif %}</td><td class="n">{% if ln.credit %}{{ money(ln.credit) }}{% endif %}</td></tr>{% endfor %}
+  </tbody><tfoot><tr><th colspan="3">{{ t('total') }}</th><th class="n">{{ money(doc.lines|sum(attribute='debit')) }}</th><th class="n">{{ money(doc.lines|sum(attribute='credit')) }}</th></tr></tfoot></table>
+  {% endif %}
+
+  <div class="sigs">
+    <div>{{ t('sig_accountant') }}</div>
+    {% if kind == 'receipt' %}<div>{{ t('sig_payer') }}</div>{% elif kind == 'payment' %}<div>{{ t('sig_receiver') }}</div>{% endif %}
+    <div>{{ t('sig_manager') }}</div>
+  </div>
+  <div class="foot"><span>{{ t('printed_at') }}: <span class="num" dir="ltr">{{ now }}</span> · {{ user.full_name }}</span><span>{{ t('status_' + doc.status) }}</span></div>
+</div>
+</body>
+</html>
