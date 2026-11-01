@@ -11,20 +11,17 @@
 {% if user.role == 'admin' %}<form method="post" action="/partners/save" class="inline-form">{{ csrf_field() }}<input name="name" placeholder="{{ t('f_name') }}" required data-testid="partner-name"><input name="id_number" placeholder="{{ t('f_id_number') }}"><input name="phone" placeholder="{{ t('f_phone') }}"><button class="primary" data-testid="partner-add">{{ t('btn_add') }}</button></form>{% endif %}
 </section>
 <section class="card"><h2>{{ t('shares_title') }}</h2><p class="muted">{{ t('help_shares') }}</p>
-{% for v in versions %}<div class="share-version" data-testid="share-version"><b>{{ t('effective_from') }} <span class="num" dir="ltr">{{ fdate(v.effective_date) }}</span></b> · {{ t('share_mode_' + v.mode) }} {{ v.note }}
-<table><tbody>{% for ln in v.lines %}<tr><td>{{ (partners|selectattr('id','equalto',ln.partner_id)|first).name }}</td>{% if v.mode == 'ratio' %}<td class="n"><span class="num" dir="ltr">{{ num(ln.weight) }}</span></td>{% endif %}<td class="n"><span class="num" dir="ltr">{{ pct(version_pct[v.id].get(ln.partner_id, 0)) }}</span></td></tr>{% endfor %}</tbody></table>
-{% if v.mode == 'percent' %}{% else %}<small class="muted">{{ t('help_ratio_display') }}</small>{% endif %}
+{% for v in versions %}<div class="share-version" data-testid="share-version"><b>{{ t('effective_from') }} <span class="num" dir="ltr">{{ fdate(v.effective_date) }}</span></b> {{ v.note }}
+<table><tbody>{% for ln in v.lines %}<tr><td>{{ (partners|selectattr('id','equalto',ln.partner_id)|first).name }}</td><td class="n"><span class="num" dir="ltr">{{ pct(version_pct[v.id].get(ln.partner_id, 0)) }}</span></td></tr>{% endfor %}</tbody></table>
 {% if user.role == 'admin' and loop.first %}<form method="post" action="/shares/{{ v.id }}/delete" class="inline confirm" data-confirm="{{ t('confirm_delete') }}">{{ csrf_field() }}<button class="danger small">{{ t('btn_delete') }}</button></form>{% endif %}</div>
 {% else %}<p class="muted">{{ t('empty') }}</p>{% endfor %}
 {% if user.role == 'admin' and partners %}
 <form method="post" action="/shares/new" class="form" id="shares-form" data-testid="shares-form">{{ csrf_field() }}
 <h3>{{ t('shares_new') }}</h3>
 <label>{{ t('effective_from') }}<input type="date" name="effective_date" required data-testid="share-date"></label>
-<fieldset><legend>{{ t('share_mode') }}</legend>
-<label class="inline"><input type="radio" name="mode" value="ratio" checked data-testid="mode-ratio"> {{ t('share_mode_ratio') }}</label>
-<label class="inline"><input type="radio" name="mode" value="percent" data-testid="mode-percent"> {{ t('share_mode_percent') }}</label>
-<small class="muted">{{ t('help_share_mode') }}</small></fieldset>
-{% for p in partners %}<label>{{ p.name }}<input type="text" inputmode="decimal" dir="ltr" name="share_{{ p.id }}" class="share-in" data-testid="share-{{ p.id }}"><small class="share-pct muted" data-for="{{ p.id }}"></small></label>{% endfor %}
+<input type="hidden" name="mode" value="percent">
+<p class="muted">{{ t('help_share_percent') }}</p>
+{% for p in partners %}<label>{{ p.name }}<input type="text" inputmode="decimal" dir="ltr" name="share_{{ p.id }}" class="share-in" placeholder="%" data-testid="share-{{ p.id }}"><small class="share-pct muted" data-for="{{ p.id }}"></small></label>{% endfor %}
 <p class="note">{{ t('shares_total') }}: <b id="share-total" class="num" dir="ltr">0</b></p>
 <label>{{ t('f_note') }}<input name="note"></label>
 <button class="primary" data-testid="share-save">{{ t('btn_save') }}</button></form>

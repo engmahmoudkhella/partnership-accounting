@@ -61,7 +61,7 @@ async function waitForServer() {
     check(page.url() === BASE + "/", "logged in on dashboard");
     await page.screenshot({ path: path.join(SHOTS, "01-dashboard-empty-ar.png"), fullPage: true });
 
-    console.log("2. Partners and exact 3:1:1:1 shares typed with Arabic digits");
+    console.log("2. Partners and shares 50% + 16.6667% x 3, typed with Arabic digits");
     await page.goto(BASE + "/partners");
     for (const n of ["عبد الوهاب سهيل مزيد", "محمود عدنان خله", "مؤمن سليم", "أحمد خالد سليم"]) {
       await page.fill("[data-testid=partner-name]", n);
@@ -70,17 +70,16 @@ async function waitForServer() {
     check((await page.locator("[data-testid=partners-table] tbody tr").count()) === 4, "4 partners listed");
     await page.fill("[data-testid=share-date]", "2026-01-01");
     const shareInputs = page.locator(".share-in");
-    await shareInputs.nth(1).fill("20.1");
-    check((await page.locator(".share-pct").nth(1).textContent()).includes("بلا كسور"), "decimal in ratio mode is flagged, not counted as zero");
-    check((await page.textContent("#share-total")).trim() === "—", "total hidden while a field is invalid");
-    const vals = ["٣", "١", "١", "١"];
+    const vals = ["٥٠", "١٦٫٦٦٦٧", "16.6667", "١٦.٦٦٦٧"];
     for (let i = 0; i < 4; i++) await shareInputs.nth(i).fill(vals[i]);
-    const pctText = await page.locator(".share-pct").first().textContent();
-    check(pctText.includes("50.0000%"), "live preview shows contractor = 50.0000% (" + pctText.trim() + ")");
-    for (let i = 1; i < 4; i++)
-      check((await page.locator(".share-pct").nth(i).textContent()).includes("16.6667%"), "partner " + i + " shows 16.6667%");
+    check((await page.textContent("#share-total")).includes("100%"), "16.6667 x 3 + 50 shows total 100%");
+    await shareInputs.nth(3).fill("16.6");
+    check((await page.textContent("#share-total")).includes("99.9"), "a wrong total is shown as such");
+    await shareInputs.nth(3).fill("16.6667");
     await page.click("[data-testid=share-save]");
     check(await page.locator(".flash.ok").isVisible(), "shares saved");
+    const ver = await page.textContent("[data-testid=share-version]");
+    check(ver.includes("16.6667%") && ver.includes("50%") && !ver.includes("أعداد صحيحة"), "saved shares shown as plain percentages");
 
     console.log("3. Accounts, customer, project");
     for (const [url, name] of [["/master/money_account", "الصندوق"], ["/master/money_account", "بنك فلسطين"],

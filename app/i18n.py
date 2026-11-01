@@ -325,6 +325,8 @@ T: dict[str, tuple[str, str]] = {
     "shares_title": ("نسب الحصص", "Shares"),
     "shares_new": ("نسب جديدة", "New shares"),
     "shares_total": ("المجموع", "Total"),
+    "help_share_percent": ("اكتب نسبة كل شريك، ويُسمح بالكسور (مثل 16.6667). المهم أن يكون المجموع 100%.",
+                           "Type each partner's percentage; decimals are fine (e.g. 16.6667). The total must be 100%."),
     "share_mode": ("طريقة إدخال الحصص", "How shares are entered"),
     "share_mode_ratio": ("نسبة بأعداد صحيحة (مثل 3:1:1:1) — دقيقة تماماً", "Whole-number ratio (e.g. 3:1:1:1) — exact"),
     "share_mode_percent": ("نسبة مئوية (مجموعها 100%)", "Percentages (must total 100%)"),

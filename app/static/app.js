@@ -106,15 +106,9 @@
     }
     var st = document.getElementById("share-total");
     if (st) {
-      var ratio = (document.querySelector("input[name=mode]:checked") || {}).value === "ratio";
+      // percentages, decimals allowed; the total must be 100%
       var ins = Array.prototype.slice.call(document.querySelectorAll(".share-in"));
-      var rs = ins.map(function (i) {
-        var r = parse(i.value, ratio ? 0 : 4);
-        // whole numbers only in ratio mode: say so instead of silently counting the field as zero
-        if (ratio && r.error && /[.٫]/.test(i.value))
-          r = {error: AR ? "في «نسبة بأعداد صحيحة» اكتب أعداداً بلا كسور (مثل 3 أو 1)، أو اختر «نسبة مئوية»" : "Ratio mode takes whole numbers (e.g. 3 or 1); for decimals choose percentages"};
-        return r;
-      });
+      var rs = ins.map(function (i) { return parse(i.value, 4); });
       var bad = rs.some(function (r) { return !!r.error; });
       var ws = rs.map(function (r) { return r.minor !== undefined ? r.minor : 0n; });
       var sum = ws.reduce(function (a, b) { return a + b; }, 0n);
@@ -122,18 +116,14 @@
         var out = document.querySelector(".share-pct[data-for='" + i.name.replace("share_", "") + "']");
         if (!out) return;
         out.classList.toggle("neg", !!rs[k].error);
-        out.textContent = rs[k].error ? rs[k].error : (sum > 0n && !bad ? "= " + fmtMinor((ws[k] * 2000000n + sum) / (2n * sum), 4) + "%" : "");
+        out.textContent = rs[k].error || "";
       });
-      if (bad) { st.textContent = "—"; st.className = "num neg"; }
-      else if (ratio) { st.textContent = fmtMinor(sum, 0); st.className = "num " + (sum > 0n ? "ok" : "neg"); }
-      else {
-        // 16.6667 x 3 + 50 = 100.0001: within 4-decimal rounding, the server saves exact thirds
-        var n = BigInt(ws.filter(function (w) { return w > 0n; }).length), diff = sum - 1000000n;
-        if (diff < 0n) diff = -diff;
-        var near = sum !== 1000000n && n > 0n && 2n * diff <= n;
-        st.textContent = fmtMinor(sum, 4) + "%" + (near ? (AR ? " ≈ 100% (تُحفظ كنِسَب دقيقة بلا تقريب)" : " ≈ 100% (saved as exact fractions)") : "");
-        st.className = "num " + (sum === 1000000n || near ? "ok" : "neg");
-      }
+      // 16.6667 + 16.6667 + 16.6667 + 50 = 100.0001 counts as 100% (rounded thirds)
+      var n = BigInt(ws.filter(function (w) { return w > 0n; }).length), diff = sum - 1000000n;
+      if (diff < 0n) diff = -diff;
+      var ok = !bad && n > 0n && 2n * diff <= n;
+      st.textContent = bad ? "—" : ok ? "100% ✓" : fmtMinor(sum, 4) + "%";
+      st.className = "num " + (ok ? "ok" : "neg");
     }
   }
   document.querySelectorAll("input[name=mode]").forEach(function (r) { r.addEventListener("change", update); });
