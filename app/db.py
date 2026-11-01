@@ -41,6 +41,11 @@ ADDED_COLUMNS = [
     ("journal_lines", "supplier_id", "INTEGER REFERENCES suppliers(id)"),
     ("journal_lines", "quantity", "INTEGER NOT NULL DEFAULT 0"),
     ("document_items", "book_quantity", "INTEGER NOT NULL DEFAULT 0"),
+    ("documents", "ref_no", "VARCHAR(100) NOT NULL DEFAULT ''"),
+    ("projects", "sale_price", "INTEGER NOT NULL DEFAULT 0"),
+    ("projects", "packaging_per_unit", "INTEGER NOT NULL DEFAULT 0"),
+    ("projects", "labor_per_unit", "INTEGER NOT NULL DEFAULT 0"),
+    ("projects", "other_per_unit", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 

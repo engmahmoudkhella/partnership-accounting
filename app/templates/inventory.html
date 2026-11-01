@@ -4,7 +4,7 @@
 {% block content %}
 <h1>{{ t('inventory_title') }}</h1>
 <p class="muted">{{ t('inventory_help') }}</p>
-{% if user.role in ('admin','accountant') %}<div class="actions"><a class="btn chip" href="/documents/new/PURCHASE">+ {{ t('doc_PURCHASE') }}</a><a class="btn chip" href="/documents/new/PRODUCTION">+ {{ t('doc_PRODUCTION') }}</a><a class="btn chip" href="/documents/new/STOCK_ISSUE">+ {{ t('doc_STOCK_ISSUE') }}</a><a class="btn chip" href="/documents/new/STOCK_COUNT">+ {{ t('doc_STOCK_COUNT') }}</a><a class="btn chip" href="/documents/new/SUPPLIER_PAYMENT">+ {{ t('doc_SUPPLIER_PAYMENT') }}</a><a class="btn chip" href="/master/item">{{ t('nav_items') }}</a><a class="btn chip" href="/master/supplier">{{ t('nav_suppliers') }}</a></div>{% endif %}
+{% if user.role in ('admin','accountant') %}<div class="actions"><a class="btn chip" href="/documents/new/PURCHASE">+ {{ t('doc_PURCHASE') }}</a><a class="btn chip" href="/documents/new/PRODUCTION">+ {{ t('doc_PRODUCTION') }}</a><a class="btn chip" href="/documents/new/STOCK_ISSUE">+ {{ t('doc_STOCK_ISSUE') }}</a><a class="btn chip" href="/documents/new/STOCK_RETURN">+ {{ t('doc_STOCK_RETURN') }}</a><a class="btn chip" href="/documents/new/STOCK_COUNT">+ {{ t('doc_STOCK_COUNT') }}</a><a class="btn chip" href="/documents/new/SUPPLIER_PAYMENT">+ {{ t('doc_SUPPLIER_PAYMENT') }}</a><a class="btn chip" href="/master/item">{{ t('nav_items') }}</a><a class="btn chip" href="/master/supplier">{{ t('nav_suppliers') }}</a></div>{% endif %}
 <form class="filters"><label class="inline">{{ t('as_of') }} <input type="date" name="as_of" value="{{ as_of.isoformat() if as_of else '' }}"></label><button>{{ t('btn_filter') }}</button><button type="button" onclick="window.print()">{{ t('btn_print') }}</button></form>
 <section class="card"><div class="scroll"><table data-testid="stock-table"><thead><tr><th>{{ t('f_item_id') }}</th><th>{{ t('f_unit') }}</th><th class="n">{{ t('col_qty_in') }}</th><th class="n">{{ t('col_qty_out') }}</th><th class="n">{{ t('col_in_stock') }}</th><th class="n">{{ t('col_avg_cost') }}</th><th class="n">{{ t('col_stock_value') }}</th></tr></thead><tbody>
 {% for r in rows %}<tr class="{{ 'inactive' if not r.item.active }}"><td><a href="/reports/ledger?code=113{{ '%02d' % r.item.id }}">{{ r.item.name }}</a></td><td>{{ r.item.unit }}</td><td class="n"><span class="num" dir="ltr">{{ qty(r.qty_in) }}</span></td><td class="n"><span class="num" dir="ltr">{{ qty(r.qty_out) }}</span></td><td class="n"><b class="num" dir="ltr">{{ qty(r.qty) }}</b></td><td class="n">{{ m(r.avg) }}</td><td class="n">{{ m(r.value) }}</td></tr>
@@ -14,6 +14,19 @@
 {% for r in recipes %}{% set p = r.project %}
 <section class="card" data-testid="recipe-{{ p.id }}"><h2>{{ p.name }}</h2>
 {% if r.lines %}<p>{{ t('stock_covers') }} <b class="num" data-testid="coverage-{{ p.id }}">{{ num(r.cov.units or 0) }}</b> {{ p.unit_name }}{% if r.cov.limiting_item_id %} · {{ t('limiting_item') }}: <b>{{ items[r.cov.limiting_item_id].name }}</b>{% endif %}</p>{% endif %}
+{% set c = r.card %}{% if r.lines or c.price %}
+<h3>{{ t('costing_title') }}</h3>
+<table class="kv" data-testid="costing-{{ p.id }}">
+{% for x in c.lines %}<tr><th>{{ x.item.name }} <span class="muted num" dir="ltr">{{ qty(x.quantity) }} {{ x.item.unit }} × {{ money(x.unit_cost) }}</span></th><td>{{ m(x.cost) }}</td></tr>{% endfor %}
+<tr><th>{{ t('costing_ingredients') }}</th><td>{{ m(c.ingredients) }}</td></tr>
+<tr><th>{{ t('f_packaging_per_unit') }}</th><td>{{ m(c.packaging) }}</td></tr>
+<tr><th>{{ t('f_labor_per_unit') }}</th><td>{{ m(c.labor) }}</td></tr>
+<tr><th>{{ t('f_other_per_unit') }}</th><td>{{ m(c.other) }}</td></tr>
+<tr class="total"><th>{{ t('costing_total') }}</th><td data-testid="card-total-{{ p.id }}">{{ m(c.total) }}</td></tr>
+<tr><th>{{ t('f_sale_price') }}</th><td>{{ m(c.price) }}</td></tr>
+<tr class="total"><th>{{ t('costing_profit') }}</th><td class="{{ 'neg' if c.profit < 0 else 'ok' }}" data-testid="card-profit-{{ p.id }}">{{ m(c.profit) }}{% if c.margin is not none %} · <span class="num" dir="ltr">{{ pct(c.margin) }}</span>{% endif %}</td></tr>
+</table><small class="muted">{{ t('costing_note') }} <a href="/master/project?edit={{ p.id }}">{{ t('btn_edit') }}</a></small>
+{% endif %}
 <form class="filters" method="get"><input type="hidden" name="as_of" value="{{ as_of.isoformat() if as_of else '' }}"><b>{{ t('unit_cost_title') }}</b>
 <label class="inline">{{ t('from') }} <input type="date" name="from" value="{{ d1.isoformat() if d1 else '' }}"></label><label class="inline">{{ t('to') }} <input type="date" name="to" value="{{ d2.isoformat() if d2 else '' }}"></label><button>{{ t('btn_filter') }}</button></form>
 <table class="kv"><tr><th>{{ t('col_units_produced') }}</th><td><span class="num" dir="ltr">{{ qty(r.produced) }}</span> {{ p.unit_name }}</td></tr>

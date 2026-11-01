@@ -66,7 +66,7 @@ CASH, AR, FA, CAP, DIST, REV, GAIN, EXP, LOSS = (
     "1100", "1200", "1500", "3100", "3200", "4100", "4900", "5100", "5900",
 )
 INV, AP = "1300", "2100"  # stock (by item) and amounts owed to suppliers (by supplier)
-STOCK_TYPES = ("PURCHASE", "STOCK_ISSUE", "PRODUCTION", "STOCK_COUNT")
+STOCK_TYPES = ("PURCHASE", "STOCK_ISSUE", "PRODUCTION", "STOCK_COUNT", "STOCK_RETURN")
 PL_CREDIT = (REV, GAIN)
 PL_DEBIT = (EXP, LOSS)
 
@@ -846,8 +846,9 @@ class Ledger:
         "PRODUCTION": ("project_id", "quantity"),
         "PURCHASE": ("supplier_id", "project_id", "paid", "money_account_id", "paid_by_partner_id"),
         "SUPPLIER_PAYMENT": ("supplier_id", "amount", "money_account_id", "paid_by_partner_id"),
-        "STOCK_ISSUE": ("project_id",),
+        "STOCK_ISSUE": ("project_id", "category"),
         "STOCK_COUNT": ("project_id",),
+        "STOCK_RETURN": ("project_id",),
     }
     _EMPTY = {"amount": 0, "fee": 0, "quantity": 0, "unit_price": 0, "category": "", "supplier": "", "paid": 0}
     _ALL_FIELDS = ("partner_id", "partner2_id", "project_id", "customer_id", "money_account_id",
@@ -869,6 +870,7 @@ class Ledger:
             else:
                 setattr(doc, f, None if f not in self._EMPTY else self._EMPTY[f])
         doc.description = (data.get("description") or "").strip()
+        doc.ref_no = (data.get("ref_no") or "").strip()[:100]
 
     def _active_ref(self, model, obj_id, old_id, err):
         if obj_id is None:
@@ -1037,6 +1039,11 @@ class Ledger:
         elif t == "STOCK_ISSUE":
             project(doc.project_id, required=True)
             self._check_items(doc, priced=False)
+            if doc.category not in ("", "stock_diff"):  # "" = used in production, stock_diff = spoiled / lost
+                raise BusinessError("err_invalid_choice")
+        elif t == "STOCK_RETURN":
+            project(doc.project_id, required=True)
+            self._check_items(doc, priced=False)
         elif t == "STOCK_COUNT":
             project(doc.project_id)
             self._check_items(doc, priced=False, allow_zero=True)
@@ -1131,11 +1138,22 @@ class Ledger:
                 item = self.s.get(Item, it.item_id)
                 it.amount = self._issue_cost(item, it.quantity, doc.date, doc.id)
                 total += it.amount
-                L.append(Line(EXP, debit=it.amount, project_id=doc.project_id, category=item.category))
+                cat = "stock_diff" if (t == "STOCK_ISSUE" and doc.category == "stock_diff") else item.category
+                L.append(Line(EXP, debit=it.amount, project_id=doc.project_id, category=cat))
                 L.append(Line(INV, credit=it.amount, item_id=it.item_id, quantity=-it.quantity,
                               project_id=doc.project_id))
             if t == "STOCK_ISSUE":
                 doc.amount = total
+        elif t == "STOCK_RETURN":
+            # unused items brought back to the store: back into stock at average cost, the project's cost goes down
+            total = 0
+            for it in doc.items:
+                item = self.s.get(Item, it.item_id)
+                it.amount = self._stock_in_value(item, it.quantity, doc.date, doc.id)
+                total += it.amount
+                L.append(Line(INV, debit=it.amount, item_id=item.id, quantity=it.quantity, project_id=doc.project_id))
+                L.append(Line(EXP, credit=it.amount, project_id=doc.project_id, category=item.category))
+            doc.amount = total
         elif t == "STOCK_COUNT":
             # counted quantity vs the books on that day: a shortage (spoilage, loss) leaves stock at average
             # cost as an expense; a surplus comes in at average cost (or the last purchase price)
@@ -1150,13 +1168,7 @@ class Ledger:
                     L.append(Line(EXP, debit=it.amount, project_id=doc.project_id, category="stock_diff"))
                     L.append(Line(INV, credit=it.amount, item_id=item.id, quantity=diff, project_id=doc.project_id))
                 elif diff > 0:
-                    if have > 0:
-                        it.amount = round_half_up_div(value * diff, have)
-                    else:
-                        last = self.s.scalar(select(DocumentItem.unit_price).join(Document).where(
-                            DocumentItem.item_id == item.id, Document.doc_type == "PURCHASE",
-                            Document.status == "POSTED").order_by(Document.date.desc(), Document.id.desc()))
-                        it.amount = line_total(diff, last or 0)
+                    it.amount = self._stock_in_value(item, diff, doc.date, doc.id)
                     L.append(Line(INV, debit=it.amount, item_id=item.id, quantity=diff, project_id=doc.project_id))
                     L.append(Line(EXP, credit=it.amount, project_id=doc.project_id, category="stock_diff"))
                 else:
@@ -1254,7 +1266,7 @@ class Ledger:
             iid, q, price = row.get("item_id"), row.get("quantity") or 0, row.get("unit_price") or 0
             if iid is None and not q:
                 continue
-            if doc.doc_type in ("STOCK_ISSUE", "STOCK_COUNT"):
+            if doc.doc_type in ("STOCK_ISSUE", "STOCK_COUNT", "STOCK_RETURN"):
                 merged[iid] = merged.get(iid, 0) + q
             else:
                 doc.items.append(DocumentItem(item_id=iid, quantity=q, unit_price=price))
@@ -1309,6 +1321,39 @@ class Ledger:
         if exclude_doc_id:
             q = q.where(JournalLine.document_id != exclude_doc_id)
         return int(self.s.scalar(q))
+
+    def _stock_in_value(self, item: Item, qty: int, d: dt.date, doc_id: int | None) -> int:
+        """Value of ``qty`` coming back into stock: average cost, or the last purchase price if none left."""
+        have, value = self.stock_of(item.id, d, exclude_doc_id=doc_id)
+        if have > 0:
+            return round_half_up_div(value * qty, have)
+        last = self.s.scalar(select(DocumentItem.unit_price).join(Document).where(
+            DocumentItem.item_id == item.id, Document.doc_type == "PURCHASE", Document.status == "POSTED",
+            Document.date <= d).order_by(Document.date.desc(), Document.id.desc()))
+        return line_total(qty, last or 0)
+
+    def costing_card(self, project: Project, as_of: dt.date | None = None) -> dict:
+        """Standard cost of one unit (meal): recipe x current average cost + per-unit packaging, labour and
+        other costs; with the sale price, the profit and margin per unit."""
+        lines = []
+        for r in self.recipe_of(project.id):
+            item = self.s.get(Item, r.item_id)
+            qty, value = self.stock_of(item.id, as_of)
+            if qty > 0:
+                unit_cost = round_half_up_div(value * 1000, qty)
+            else:
+                unit_cost = self.s.scalar(select(DocumentItem.unit_price).join(Document).where(
+                    DocumentItem.item_id == item.id, Document.doc_type == "PURCHASE",
+                    Document.status == "POSTED").order_by(Document.date.desc(), Document.id.desc())) or 0
+            lines.append({"item": item, "quantity": r.quantity, "unit_cost": unit_cost,
+                          "cost": line_total(r.quantity, unit_cost)})
+        ingredients = sum(x["cost"] for x in lines)
+        total = ingredients + project.packaging_per_unit + project.labor_per_unit + project.other_per_unit
+        profit = project.sale_price - total
+        margin = round_half_up_div(profit * PPM_TOTAL, project.sale_price) if project.sale_price else None
+        return {"lines": lines, "ingredients": ingredients, "packaging": project.packaging_per_unit,
+                "labor": project.labor_per_unit, "other": project.other_per_unit, "total": total,
+                "price": project.sale_price, "profit": profit, "margin": margin}
 
     def recipe_of(self, project_id: int) -> list[RecipeLine]:
         return list(self.s.scalars(select(RecipeLine).where(RecipeLine.project_id == project_id)

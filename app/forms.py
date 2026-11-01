@@ -34,7 +34,8 @@ FORM_FIELDS: dict[str, list[tuple[str, str, bool]]] = {
                  ("paid", "money0", False), ("pay_source", "paysource_opt", False)],
     "SUPPLIER_PAYMENT": [("supplier_id", "supplier", True), ("amount", "money", True),
                          ("pay_source", "paysource", True)],
-    "STOCK_ISSUE": [("project_id", "project", True), ("items", "items", True)],
+    "STOCK_ISSUE": [("project_id", "project", True), ("category", "issue_reason", False), ("items", "items", True)],
+    "STOCK_RETURN": [("project_id", "project", True), ("items", "items", True)],
     "STOCK_COUNT": [("project_id", "project", False), ("items", "items", True)],
 }
 MAX_ITEM_ROWS = 40
@@ -54,6 +55,7 @@ FIELD_LABELS = {
     ("TRANSFER", "amount"): "f_amount_sent",
     ("RECEIPT", "amount"): "f_amount_settled",
     ("PURCHASE", "paid"): "f_paid_now",
+    ("STOCK_ISSUE", "category"): "f_issue_reason",
     ("SUPPLIER_PAYMENT", "amount"): "f_amount_paid",
 }
 
@@ -94,6 +96,7 @@ def parse_document_form(doc_type: str, form) -> tuple[dict, dict, dict]:
         errors["date"] = e
     data["description"] = (form.get("description") or "").strip()
     data["confirm_overpay"] = form.get("confirm_overpay") == "1"
+    data["ref_no"] = (form.get("ref_no") or "").strip()[:100]
     for field, kind, required in FORM_FIELDS[doc_type]:
         raw = form.get(field, "")
         raw = raw if isinstance(raw, str) else ""
@@ -112,6 +115,8 @@ def parse_document_form(doc_type: str, form) -> tuple[dict, dict, dict]:
                         raise NumberError("err_asset_name_required")
                 else:
                     data[field] = raw.strip()[:200]
+            elif kind == "issue_reason":
+                data[field] = "stock_diff" if raw.strip() == "stock_diff" else ""
             elif kind == "category":
                 data[field] = raw.strip()
             elif kind == "items":

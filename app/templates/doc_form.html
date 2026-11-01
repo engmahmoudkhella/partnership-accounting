@@ -39,6 +39,8 @@
   <button type="button" class="small" id="add-item-row">+ {{ t('add_row') }}</button>
   {% if priced %}<p class="note" id="purchase-sum">{{ t('f_total') }}: <b class="num" dir="ltr" id="purchase-total" data-testid="purchase-total">—</b> · {{ t('col_debt_remaining') }}: <b class="num neg" dir="ltr" id="purchase-debt">—</b></p>{% endif %}
   </fieldset>
+  {% elif kind == 'issue_reason' %}
+  <label>{{ label }}<select name="category" data-testid="f-issue-reason"><option value="" {{ 'selected' if values.get('category','') != 'stock_diff' }}>{{ t('reason_use') }}</option><option value="stock_diff" {{ 'selected' if values.get('category') == 'stock_diff' }}>{{ t('reason_spoilage') }}</option></select></label>
   {% elif kind == 'category' %}
   <label>{{ label }} *<select name="category" data-testid="f-category"><option value="">—</option>{% for c in opts.category %}<option value="{{ c }}" {{ 'selected' if values.get('category')==c }}>{{ t('cat_' + c) }}</option>{% endfor %}</select></label>
   {% elif kind in ('paysource', 'paysource_opt', 'paysource_credit') %}
@@ -65,6 +67,7 @@
 {% if doc_type == 'DISTRIBUTION' and extra.get('shares') %}
 <div class="note"><b>{{ t('dist_split') }}</b><ul id="dist-split" data-shares='{{ extra.shares|tojson }}' data-names='{{ extra.share_names|tojson }}'></ul></div>
 {% endif %}
+<label>{{ t('f_ref_no') }}<input name="ref_no" maxlength="100" value="{{ values.get('ref_no','') }}" data-testid="f-ref_no"></label>
 <label>{{ t('f_description') }}<textarea name="description" rows="2" data-testid="f-description">{{ values.get('description','') }}</textarea></label>
 {% if attach %}
 <label>{{ t('f_attachment') }}<input type="file" name="attachment" accept=".jpg,.jpeg,.png,.webp,.pdf" data-testid="f-attachment"></label>

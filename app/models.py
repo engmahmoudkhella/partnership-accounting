@@ -119,6 +119,11 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String(200), unique=True)
     kind: Mapped[str] = mapped_column(String(30), default="other")  # kitchen, parcels, other
     unit_name: Mapped[str] = mapped_column(String(50), default="")  # e.g. "وجبة"
+    # costing card of one unit (meal): sale price and per-unit costs not taken from stock
+    sale_price: Mapped[int] = mapped_column(Integer, default=0)
+    packaging_per_unit: Mapped[int] = mapped_column(Integer, default=0)
+    labor_per_unit: Mapped[int] = mapped_column(Integer, default=0)
+    other_per_unit: Mapped[int] = mapped_column(Integer, default=0)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
@@ -205,6 +210,7 @@ DOC_TYPES = (
     "SUPPLIER_PAYMENT",
     "STOCK_ISSUE",
     "STOCK_COUNT",
+    "STOCK_RETURN",
 )
 # document types that never create ledger lines
 MEMO_TYPES = ("CAPITAL_CALL", "PRODUCTION")
@@ -237,6 +243,7 @@ class Document(Base):
     date: Mapped[dt.date] = mapped_column(Date, index=True)
     status: Mapped[str] = mapped_column(String(20), default="POSTED", index=True)
     description: Mapped[str] = mapped_column(Text, default="")
+    ref_no: Mapped[str] = mapped_column(String(100), default="")  # supplier invoice / external voucher number
 
     amount: Mapped[int] = mapped_column(Integer, default=0)
     fee: Mapped[int] = mapped_column(Integer, default=0)

@@ -26,6 +26,8 @@
 {% elif entity == 'project' %}
 <label>{{ t('f_kind') }}<select name="kind">{% for k in ['kitchen','parcels','other'] %}<option value="{{ k }}" {{ 'selected' if edit and edit.kind == k }}>{{ t('pk_' + k) }}</option>{% endfor %}</select></label>
 <label>{{ t('f_unit_name') }}<input name="unit_name" value="{{ edit.unit_name if edit else '' }}"></label>
+<fieldset><legend>{{ t('costing_title') }}</legend><small class="muted">{{ t('costing_help') }}</small>
+{% for k in ['sale_price','packaging_per_unit','labor_per_unit','other_per_unit'] %}<label>{{ t('f_' + k) }}<input type="text" inputmode="decimal" name="{{ k }}" dir="ltr" class="numin" data-kind="money" value="{{ N.money_input_value(edit[k]) if edit and edit[k] else '' }}" data-testid="m-{{ k }}"><small class="preview"></small></label>{% endfor %}</fieldset>
 <label>{{ t('f_note') }}<textarea name="notes">{{ edit.notes if edit else '' }}</textarea></label>
 {% elif entity == 'supplier' %}
 <label>{{ t('f_phone') }}<input name="phone" dir="ltr" value="{{ edit.phone if edit else '' }}"></label>

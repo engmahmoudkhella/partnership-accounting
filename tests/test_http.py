@@ -811,3 +811,20 @@ def test_project_shares_via_form(ready):
                                        "mode": "percent", f"pshare_{p[0]}": "50", f"pshare_{p[1]}": "20"},
                page="/partners")
     assert "100% بالضبط" in r.text
+
+
+def test_ref_no_and_project_costing_via_forms(ready):
+    c = ready
+    ids = c.ids
+    r = c.post("/master/project/save", {"id": str(ids["project"]), "name": "المطبخ", "kind": "kitchen",
+                                        "unit_name": "وجبة", "notes": "", "sale_price": "١٧", "packaging_per_unit": "0.6",
+                                        "labor_per_unit": "1", "other_per_unit": ""}, page="/master/project")
+    assert "flash ok" in r.text
+    r = c.post("/documents/new/EXPENSE", {"date": "2026-10-03", "category": "food", "amount": "10",
+                                          "pay_source": "account", "money_account_id": str(ids["cash"]),
+                                          "ref_no": "INV-55"}, page="/documents/new/EXPENSE")
+    assert "flash ok" in r.text and "INV-55" in r.text
+    r = c.get("/documents?q=INV-55")
+    assert "INV-55" in r.text or "10.00" in r.text
+    r = c.get("/inventory")
+    assert "بطاقة تكلفة الوحدة" in r.text and "17.00" in r.text

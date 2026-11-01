@@ -506,7 +506,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         }
 
     def doc_values(doc: Document) -> dict:
-        v = {"date": doc.date.isoformat(), "description": doc.description}
+        v = {"date": doc.date.isoformat(), "description": doc.description, "ref_no": doc.ref_no or ""}
         for field, kind, _ in FORM_FIELDS[doc.doc_type]:
             if kind in ("money", "money0"):
                 v[field] = N.money_input_value(getattr(doc, field))
@@ -571,7 +571,8 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             stmt = stmt.where(Document.date <= d2)
         if q.get("q"):
             like = f"%{q['q']}%"
-            stmt = stmt.where(or_(Document.description.like(like), Document.supplier.like(like)))
+            stmt = stmt.where(or_(Document.description.like(like), Document.supplier.like(like),
+                                  Document.ref_no.like(like)))
         if q.get("awaiting") == "me" and ctx.user:
             decided = select(Approval.document_id).where(Approval.user_id == ctx.user.id)
             stmt = stmt.where(Document.status == "PENDING", Document.id.not_in(decided))
@@ -623,7 +624,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             extra["threshold"] = ctx.L.approval_threshold
         if doc_type == "SUPPLIER_PAYMENT":
             extra["supplier_debts"] = {sp.id: ctx.L.supplier_owed(sp.id) for sp in ctx.s.scalars(select(Supplier))}
-        if doc_type in ("STOCK_ISSUE", "PRODUCTION", "STOCK_COUNT"):
+        if doc_type in ("STOCK_ISSUE", "PRODUCTION", "STOCK_COUNT", "STOCK_RETURN"):
             extra["stock"] = {i.id: ctx.L.stock_of(i.id)[0] for i in ctx.s.scalars(select(Item))}
         if doc_type == "PRODUCTION":
             items = {i.id: i for i in ctx.s.scalars(select(Item))}
@@ -1102,6 +1103,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
                 jq.append(JournalLine.date <= d2)
             used = int(ctx.s.scalar(select(func.coalesce(func.sum(JournalLine.credit), 0)).where(*jq)))
             recipes.append({"project": p, "lines": lines, "cov": cov, "produced": produced, "used": used,
+                            "card": L.costing_card(p, as_of),
                             "per_unit": (used * 1000 // produced) if produced else None})
         suppliers = [(sp, L.supplier_owed(sp.id))
                      for sp in ctx.s.scalars(select(Supplier).order_by(Supplier.active.desc(), Supplier.id))]
@@ -1161,6 +1163,9 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             fields.update(kind=form.get("kind", ""), holder=form.get("holder", ""))
         if entity == "project":
             fields.update(kind=form.get("kind", ""), unit_name=form.get("unit_name", ""), notes=form.get("notes", ""))
+            for k in ("sale_price", "packaging_per_unit", "labor_per_unit", "other_per_unit"):
+                raw = (form.get(k) or "").strip()
+                fields[k] = N.parse_money(raw, allow_zero=True) if raw else 0
         if entity == "supplier":
             fields.update(phone=form.get("phone", ""))
         if entity == "item":

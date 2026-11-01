@@ -245,3 +245,42 @@ def test_stock_count_shortage_and_surplus(kitchen):
     L.void_document(doc, "عدّ خاطئ")
     w.s.commit()
     assert L.stock_of(w.wood.id)[0] == 5_000 * KG
+
+
+def test_issue_reason_spoilage_and_return_to_stock(kitchen):
+    w = kitchen
+    buy_all(w)
+    L = w.L
+    # 50 kg of beef spoiled: out of stock as "stock_diff", not as meat used in production
+    L.create_document("STOCK_ISSUE", D(3), {"project_id": w.kitchen.id, "category": "stock_diff",
+                                            "items": [{"item_id": w.beef.id, "quantity": 50 * KG}]})
+    # 100 kg of rice taken to the kitchen, 20 kg brought back unused
+    L.create_document("STOCK_ISSUE", D(3), {"project_id": w.kitchen.id,
+                                            "items": [{"item_id": w.rice.id, "quantity": 100 * KG}]})
+    ret = L.create_document("STOCK_RETURN", D(4), {"project_id": w.kitchen.id, "ref_no": "R-7",
+                                                   "items": [{"item_id": w.rice.id, "quantity": 20 * KG}]})
+    w.s.commit()
+    from sqlalchemy import func
+    from app.models import JournalLine
+    by_cat = dict(w.s.execute(select(JournalLine.category, func.sum(JournalLine.debit - JournalLine.credit))
+                              .where(JournalLine.account == EXP).group_by(JournalLine.category)).all())
+    assert by_cat == {"stock_diff": 175_000, "food": 72_000}  # 50 x 35 ; (100 - 20) x 9
+    assert ret.amount == 18_000 and ret.ref_no == "R-7"
+    assert L.stock_of(w.rice.id)[0] == 9_920 * KG
+    from app import chart
+    assert chart.voucher_kind(ret) == "return"
+    assert code(L.create_document, "STOCK_ISSUE", D(4), {"project_id": w.kitchen.id, "category": "gift",
+                                                         "items": [{"item_id": w.rice.id, "quantity": KG}]}) \
+        == "err_invalid_choice"
+
+
+def test_costing_card(kitchen):
+    w = kitchen
+    buy_all(w)
+    L = w.L
+    p = w.kitchen
+    p.sale_price, p.packaging_per_unit, p.labor_per_unit, p.other_per_unit = 1_700, 60, 100, 0
+    card = L.costing_card(p)
+    # 0.4 kg rice x 9 + 0.15 kg beef x 35 = 8.85 ; + 0.60 packaging + 1.00 labour = 10.45
+    assert card["ingredients"] == 885 and card["total"] == 1_045
+    assert card["profit"] == 655 and card["margin"] == 385_294  # 38.5294%

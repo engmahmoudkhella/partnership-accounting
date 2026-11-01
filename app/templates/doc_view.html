@@ -27,6 +27,7 @@
 {% if doc.fee %}<tr><th>{{ t('f_fee') }}</th><td>{{ m(doc.fee) }}</td></tr>{% endif %}
 {% if doc.supplier %}<tr><th>{{ t('f_supplier') }}</th><td>{{ doc.supplier }}</td></tr>{% endif %}
 {% if doc.capital_call_id %}<tr><th>{{ t('f_capital_call_id') }}</th><td><a href="/documents/{{ doc.capital_call_id }}">#{{ doc.capital_call_id }}</a></td></tr>{% endif %}
+{% if doc.ref_no %}<tr><th>{{ t('f_ref_no') }}</th><td data-testid="doc-ref">{{ doc.ref_no }}</td></tr>{% endif %}
 {% if doc.description %}<tr><th>{{ t('f_description') }}</th><td>{{ doc.description }}</td></tr>{% endif %}
 {% if doc.attachment %}<tr><th>{{ t('f_attachment') }}</th><td><a href="/documents/{{ doc.id }}/attachment" target="_blank">{{ doc.attachment_name or t('f_attachment') }}</a></td></tr>{% endif %}
 <tr><th>{{ t('col_created') }}</th><td>{{ names.user.get(doc.created_by, '') }} · {{ doc.created_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>
