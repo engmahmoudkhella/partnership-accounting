@@ -220,7 +220,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     def err_text(ctx: Ctx, e) -> str:
         params = dict(getattr(e, "params", {}) or {})
         for k, v in list(params.items()):
-            if k in ("debit", "credit", "diff", "called", "paid", "excess", "balance"):
+            if k in ("debit", "credit", "diff", "called", "paid", "excess", "balance", "owed"):
                 params[k] = N.format_money(v, ctx.digits)
             if k == "total":
                 params[k] = N.format_percent(v, ctx.digits)
@@ -617,6 +617,8 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             extra["share_names"] = {p.id: p.name for p in ctx.s.scalars(select(Partner))}
         if doc_type in ("EXPENSE", "ASSET_PURCHASE", "PURCHASE"):
             extra["threshold"] = ctx.L.approval_threshold
+        if doc_type == "SUPPLIER_PAYMENT":
+            extra["supplier_debts"] = {sp.id: ctx.L.supplier_owed(sp.id) for sp in ctx.s.scalars(select(Supplier))}
         if doc_type in ("STOCK_ISSUE", "PRODUCTION"):
             extra["stock"] = {i.id: ctx.L.stock_of(i.id)[0] for i in ctx.s.scalars(select(Item))}
         if doc_type == "PRODUCTION":
@@ -656,7 +658,8 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             if ctx.new_upload:
                 os.remove(os.path.join(upload_dir, ctx.new_upload))
             return render(ctx, "doc_form.html", status_code=422, doc_type=doc_type, doc=None, values=values,
-                          errors={"_": err_text(ctx, e)}, fields=FORM_FIELDS[doc_type], opts=form_options(ctx),
+                          errors={"_": err_text(ctx, e), "_confirm": e.code.startswith("warn_")},
+                          fields=FORM_FIELDS[doc_type], opts=form_options(ctx),
                           attach=doc_type in ATTACHMENT_TYPES, extra=_form_extra(ctx, doc_type))
         flash(ctx.request, "ok", ctx.t("msg_doc_saved_pending" if doc.status == "PENDING" else "msg_doc_saved"))
         raise Redirect(f"/documents/{doc.id}")
@@ -734,7 +737,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             doc = ctx.s.get(Document, doc_id)
             common["doc"] = doc
             return render(ctx, "doc_form.html", status_code=422, opts=form_options(ctx, doc),
-                          errors={"_": err_text(ctx, e)}, **common)
+                          errors={"_": err_text(ctx, e), "_confirm": e.code.startswith("warn_")}, **common)
         flash(ctx.request, "ok", ctx.t("msg_doc_saved_pending" if doc.status == "PENDING" else "msg_doc_saved"))
         raise Redirect(f"/documents/{doc.id}")
 
@@ -1055,7 +1058,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             used = int(ctx.s.scalar(select(func.coalesce(func.sum(JournalLine.credit), 0)).where(*jq)))
             recipes.append({"project": p, "lines": lines, "cov": cov, "produced": produced, "used": used,
                             "per_unit": (used * 1000 // produced) if produced else None})
-        suppliers = [(sp, L.balance("2100", supplier_id=sp.id))
+        suppliers = [(sp, L.supplier_owed(sp.id))
                      for sp in ctx.s.scalars(select(Supplier).order_by(Supplier.active.desc(), Supplier.id))]
         return render(ctx, "inventory.html", rows=L.inventory(as_of), as_of=as_of, d1=d1, d2=d2, items=items,
                       recipes=recipes, suppliers=suppliers, active_items=[i for i in items.values() if i.active])
@@ -1091,7 +1094,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         if entity == "customer":
             bal = {i.id: ctx.L.balance("1200", customer_id=i.id) for i in items}
         if entity == "supplier":
-            bal = {i.id: ctx.L.balance("2100", supplier_id=i.id) for i in items}
+            bal = {i.id: ctx.L.supplier_owed(i.id) for i in items}
         if entity == "item":
             bal = {i.id: ctx.L.stock_of(i.id) for i in items}
         edit = None

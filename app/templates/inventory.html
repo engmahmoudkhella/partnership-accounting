@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import csrf_field, m with context %}
+{% from "macros.html" import csrf_field, m, sbal with context %}
 {% block title %}{{ t('inventory_title') }}{% endblock %}
 {% block content %}
 <h1>{{ t('inventory_title') }}</h1>
@@ -28,6 +28,6 @@
 </section>{% endfor %}
 
 <section class="card"><h2>{{ t('suppliers_balances') }}</h2><table data-testid="suppliers-table"><thead><tr><th>{{ t('f_supplier_id') }}</th><th class="n">{{ t('col_we_owe') }}</th></tr></thead><tbody>
-{% for sp, b in suppliers %}<tr><td><a href="/reports/ledger?code=210{{ '%02d' % sp.id }}">{{ sp.name }}</a></td><td class="n {{ 'neg' if b > 0 }}">{{ m(b) }}</td></tr>{% else %}<tr><td colspan="2" class="muted">{{ t('empty') }}</td></tr>{% endfor %}
+{% for sp, b in suppliers %}<tr><td><a href="/reports/ledger?code=210{{ '%02d' % sp.id }}">{{ sp.name }}</a></td><td class="n">{{ sbal(b) }}</td></tr>{% else %}<tr><td colspan="2" class="muted">{{ t('empty') }}</td></tr>{% endfor %}
 </tbody><tfoot><tr><th>{{ t('total') }}</th><th class="n">{{ m(suppliers|sum(attribute='1')) }}</th></tr></tfoot></table></section>
 {% endblock %}

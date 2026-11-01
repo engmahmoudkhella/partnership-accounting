@@ -752,3 +752,21 @@ def test_expense_on_credit_via_form(ready):
     assert "اختر المورد" in r.text
     r = c.get("/inventory")
     assert "3,000.00" in r.text  # owed to the cook
+
+
+def test_supplier_overpay_asks_for_confirmation(ready):
+    c = ready
+    ids = c.ids
+    c.post("/master/supplier/save", {"name": "يونجا"}, page="/master/supplier")
+    s = c.db()
+    from app.models import Supplier
+    sup = s.scalar(select(Supplier.id))
+    s.close()
+    form = {"date": "2026-10-03", "supplier_id": str(sup), "amount": "500", "pay_source": "account",
+            "money_account_id": str(ids["cash"])}
+    r = c.post("/documents/new/SUPPLIER_PAYMENT", form, page="/documents/new/SUPPLIER_PAYMENT")
+    assert "تنبيه" in r.text and 'name="confirm_overpay"' in r.text
+    r = c.post("/documents/new/SUPPLIER_PAYMENT", {**form, "confirm_overpay": "1"}, page="/documents/new/SUPPLIER_PAYMENT")
+    assert "flash ok" in r.text
+    r = c.get("/inventory")
+    assert "لنا عنده" in r.text and "500.00" in r.text

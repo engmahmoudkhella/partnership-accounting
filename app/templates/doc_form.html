@@ -60,6 +60,7 @@
   {{ err(errors, field) }}
 {% endfor %}
 {% if doc_type == 'PRODUCTION' and extra.get('recipes') %}<div class="note" data-testid="recipe-note">{% for pid, r in extra.recipes.items() %}<div class="recipe-info" data-project="{{ pid }}"><b>{{ t('recipe_per_unit') }} {{ r.unit_name or '' }}:</b> {% for item, q in r.lines %}{{ item.name }} <span class="num" dir="ltr">{{ qty(q) }}</span> {{ item.unit }}{{ '، ' if not loop.last }}{% endfor %} · {{ t('stock_covers') }} <b class="num">{{ num(r.units or 0) }}</b> {{ r.unit_name or '' }}</div>{% endfor %}<small class="muted">{{ t('help_production_recipe') }}</small></div>{% endif %}
+{% if doc_type == 'SUPPLIER_PAYMENT' %}<p class="note" id="sup-debt" data-debts='{{ extra.supplier_debts|tojson }}' data-l-owed="{{ t('sup_owed') }}" data-l-adv="{{ t('sup_advance') }}" data-l-warn="{{ t('warn_more_than_owed') }}"></p>{% endif %}
 {% if doc_type == 'INVOICE' %}<p class="note">{{ t('f_total') }}: <b><span class="num" dir="ltr" id="invoice-total" data-testid="invoice-total">—</span></b></p>{% endif %}
 {% if doc_type == 'DISTRIBUTION' and extra.get('shares') %}
 <div class="note"><b>{{ t('dist_split') }}</b><ul id="dist-split" data-shares='{{ extra.shares|tojson }}' data-names='{{ extra.share_names|tojson }}'></ul></div>
@@ -70,6 +71,7 @@
 <small class="muted">{{ t('help_attachment') }}</small>
 {% if doc and doc.attachment %}<p><a href="/documents/{{ doc.id }}/attachment" target="_blank">{{ doc.attachment_name or t('f_attachment') }}</a> <label class="inline"><input type="checkbox" name="remove_attachment" value="1"> {{ t('remove_attachment') }}</label></p>{% endif %}
 {% endif %}
+{% if errors.get('_confirm') %}<label class="confirm-box"><input type="checkbox" name="confirm_overpay" value="1" required data-testid="confirm-overpay"> {{ t('confirm_overpay') }}</label>{% endif %}
 <div class="actions">
 <button class="primary" data-testid="save">{{ t('btn_save') }}</button>
 <a class="btn" href="{{ '/documents/%d' % doc.id if doc else '/documents' }}">{{ t('btn_cancel') }}</a>

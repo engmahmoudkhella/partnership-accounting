@@ -4,4 +4,5 @@
 {% macro err(errors, key) %}{% if errors.get(key) %}<div class="field-error" role="alert">{{ errors[key] }}</div>{% endif %}{% endmacro %}
 {% macro gap(v) %}{% if v is none %}—{% elif v > 0 %}<span class="neg">{{ t('gap_owes') }} <span class="num" dir="ltr">{{ money(v) }}</span></span>{% elif v < 0 %}<span class="ok">{{ t('gap_owed') }} <span class="num" dir="ltr">{{ money(-v) }}</span></span>{% else %}<span class="num" dir="ltr">{{ money(0) }}</span>{% endif %}{% endmacro %}
 {% macro bal(v) %}<span class="num" dir="ltr">{{ money(v if v >= 0 else -v) }}</span>{% if v %} <span class="{{ 'bal-d' if v > 0 else 'bal-c' }}">{{ t('bal_d') if v > 0 else t('bal_c') }}</span>{% endif %}{% endmacro %}
+{% macro sbal(v) %}{% if v > 0 %}<span class="neg">{{ t('sup_owed') }} <span class="num" dir="ltr">{{ money(v) }}</span></span>{% elif v < 0 %}<span class="ok">{{ t('sup_advance') }} <span class="num" dir="ltr">{{ money(-v) }}</span></span>{% else %}<span class="num" dir="ltr">{{ money(0) }}</span>{% endif %}{% endmacro %}
 {% macro vlabel(doc) %}<span class="vk vk-{{ vk(doc) }}">{{ t('vk_' + vk(doc)) }}</span>{% endmacro %}

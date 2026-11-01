@@ -213,6 +213,26 @@
     document.querySelectorAll(".recipe-info").forEach(function (d) { d.style.display = d.dataset.project === v ? "" : "none"; });
   }
   if (prodProject && document.querySelector(".recipe-info")) { prodProject.addEventListener("change", recipeInfo); recipeInfo(); }
+  // payment to supplier: show what we owe him and warn when paying more
+  var supDebt = document.getElementById("sup-debt");
+  function supDebtUpdate() {
+    if (!supDebt) return;
+    var debts = JSON.parse(supDebt.dataset.debts || "{}"), sel = document.querySelector("[name=supplier_id]");
+    var id = sel ? sel.value : "";
+    if (!id || debts[id] === undefined) { supDebt.textContent = ""; supDebt.style.display = "none"; return; }
+    supDebt.style.display = "";
+    var owed = BigInt(debts[id]), amt = val("amount", 2);
+    var txt = (owed >= 0n ? supDebt.dataset.lOwed + " " + fmtMinor(owed, 2) : supDebt.dataset.lAdv + " " + fmtMinor(-owed, 2));
+    var over = amt !== null && amt > (owed > 0n ? owed : 0n);
+    supDebt.textContent = txt + (over ? " — " + supDebt.dataset.lWarn : "");
+    supDebt.classList.toggle("warnbox", over);
+  }
+  if (supDebt) {
+    document.querySelectorAll("[name=supplier_id],[name=amount]").forEach(function (el) {
+      el.addEventListener("input", supDebtUpdate); el.addEventListener("change", supDebtUpdate);
+    });
+    supDebtUpdate();
+  }
   // confirmation before destructive actions
   document.querySelectorAll("form.confirm").forEach(function (f) {
     f.addEventListener("submit", function (e) { if (!window.confirm(f.dataset.confirm)) e.preventDefault(); });

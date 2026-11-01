@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import csrf_field, m with context %}
+{% from "macros.html" import csrf_field, m, sbal with context %}
 {% block title %}{{ t('master_' + entity) }}{% endblock %}
 {% block content %}
 <h1>{{ t('master_' + entity) }}</h1>
@@ -7,7 +7,7 @@
 {% if entity == 'money_account' %}<th>{{ t('f_kind') }}</th><th>{{ t('f_holder') }}</th><th class="n">{{ t('col_balance') }}</th>{% elif entity == 'project' %}<th>{{ t('f_kind') }}</th><th>{{ t('f_unit_name') }}</th>{% elif entity == 'supplier' %}<th>{{ t('f_phone') }}</th><th class="n">{{ t('col_we_owe') }}</th>{% elif entity == 'item' %}<th>{{ t('f_unit') }}</th><th>{{ t('f_category') }}</th><th class="n">{{ t('col_in_stock') }}</th><th class="n">{{ t('col_stock_value') }}</th>{% else %}<th class="n">{{ t('col_owed') }}</th>{% endif %}
 <th>{{ t('col_status') }}</th><th></th></tr></thead><tbody>
 {% for i in items %}<tr class="{{ 'inactive' if not i.active }}"><td>{% if entity == 'money_account' %}<a href="/reports/cash/{{ i.id }}">{{ i.name }}</a>{% elif entity == 'customer' %}<a href="/reports/customer/{{ i.id }}">{{ i.name }}</a>{% elif entity in ('supplier', 'item') %}<a href="/reports/ledger?code={{ ('210' if entity == 'supplier' else '113') ~ ('%02d' % i.id) }}">{{ i.name }}</a>{% else %}<a href="/documents?project={{ i.id }}">{{ i.name }}</a>{% endif %}</td>
-{% if entity == 'money_account' %}<td>{{ t('ak_' + i.kind) }}</td><td>{{ i.holder }}</td><td class="n">{{ m(bal[i.id]) }}</td>{% elif entity == 'project' %}<td>{{ t('pk_' + i.kind) }}</td><td>{{ i.unit_name }}</td>{% elif entity == 'supplier' %}<td dir="ltr">{{ i.phone }}</td><td class="n {{ 'neg' if bal[i.id] > 0 }}">{{ m(bal[i.id]) }}</td>{% elif entity == 'item' %}<td>{{ i.unit }}</td><td>{{ t('cat_' + i.category) }}</td><td class="n"><span class="num" dir="ltr">{{ qty(bal[i.id][0]) }}</span></td><td class="n">{{ m(bal[i.id][1]) }}</td>{% else %}<td class="n">{{ m(bal[i.id]) }}</td>{% endif %}
+{% if entity == 'money_account' %}<td>{{ t('ak_' + i.kind) }}</td><td>{{ i.holder }}</td><td class="n">{{ m(bal[i.id]) }}</td>{% elif entity == 'project' %}<td>{{ t('pk_' + i.kind) }}</td><td>{{ i.unit_name }}</td>{% elif entity == 'supplier' %}<td dir="ltr">{{ i.phone }}</td><td class="n">{{ sbal(bal[i.id]) }}</td>{% elif entity == 'item' %}<td>{{ i.unit }}</td><td>{{ t('cat_' + i.category) }}</td><td class="n"><span class="num" dir="ltr">{{ qty(bal[i.id][0]) }}</span></td><td class="n">{{ m(bal[i.id][1]) }}</td>{% else %}<td class="n">{{ m(bal[i.id]) }}</td>{% endif %}
 <td>{{ t('active') if i.active else t('inactive') }}</td>
 <td>{% if user.role in ('admin','accountant') %}<a class="btn small" href="?edit={{ i.id }}">{{ t('btn_edit') }}</a>
 <form method="post" action="/master/{{ entity }}/{{ i.id }}/active" class="inline">{{ csrf_field() }}<input type="hidden" name="active" value="{{ '0' if i.active else '1' }}"><button class="small" data-testid="toggle-{{ i.id }}">{{ t('btn_deactivate') if i.active else t('btn_activate') }}</button></form>

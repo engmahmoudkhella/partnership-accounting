@@ -92,6 +92,7 @@ def parse_document_form(doc_type: str, form) -> tuple[dict, dict, dict]:
     except NumberError as e:
         errors["date"] = e
     data["description"] = (form.get("description") or "").strip()
+    data["confirm_overpay"] = form.get("confirm_overpay") == "1"
     for field, kind, required in FORM_FIELDS[doc_type]:
         raw = form.get(field, "")
         raw = raw if isinstance(raw, str) else ""

@@ -929,6 +929,11 @@ class Ledger:
             else:
                 positive(doc.amount)
                 paying = doc.amount
+                # paying more than we owe is allowed (an advance to the supplier), but only once confirmed
+                owed = self.supplier_owed(doc.supplier_id, doc.date, exclude_doc_id=doc.id)
+                if doc.amount > max(owed, 0) and not getattr(self, "_confirm_overpay", False):
+                    raise BusinessError("warn_supplier_overpay", owed=max(owed, 0),
+                                        excess=doc.amount - max(owed, 0))
             if paying:
                 if (doc.money_account_id is None) == (doc.paid_by_partner_id is None):
                     raise BusinessError("err_pay_source")
@@ -1172,6 +1177,17 @@ class Ledger:
                                 available=N_format_quantity(have), date=d.isoformat())
         return value if qty == have else round_half_up_div(value * qty, have)
 
+    def supplier_owed(self, supplier_id: int, as_of: dt.date | None = None,
+                      exclude_doc_id: int | None = None) -> int:
+        """What we owe a supplier (negative = we paid in advance, he owes us)."""
+        q = select(func.coalesce(func.sum(JournalLine.credit - JournalLine.debit), 0)).where(
+            JournalLine.account == AP, JournalLine.supplier_id == supplier_id)
+        if as_of:
+            q = q.where(JournalLine.date <= as_of)
+        if exclude_doc_id:
+            q = q.where(JournalLine.document_id != exclude_doc_id)
+        return int(self.s.scalar(q))
+
     def recipe_of(self, project_id: int) -> list[RecipeLine]:
         return list(self.s.scalars(select(RecipeLine).where(RecipeLine.project_id == project_id)
                                    .order_by(RecipeLine.id)))
@@ -1245,7 +1261,6 @@ class Ledger:
         self._running_check(AR, "customer_id", "err_receivable_negative")
         self._running_check(CAP, "partner_id", "err_capital_negative")
         self._running_check(FA, "asset_id", "err_asset_negative")
-        self._running_check(AP, "supplier_id", "err_payable_negative")
         self._running_check(INV, "item_id", "err_stock_negative")
         # stock quantities never go below zero on any day
         running: dict = defaultdict(int)
@@ -1322,6 +1337,7 @@ class Ledger:
                        created_by=self.user.id if self.user else None)
         self._apply_fields(doc, data, None)
         self._set_items(doc, data)
+        self._confirm_overpay = bool(data.get("confirm_overpay"))
         if doc_type == "ASSET_PURCHASE" and not (asset_name or "").strip():
             raise BusinessError("err_asset_name_required")
         self._validate(doc, None, asset_name)
@@ -1367,6 +1383,7 @@ class Ledger:
         doc.date = date
         self._apply_fields(doc, data, None)
         self._set_items(doc, data)
+        self._confirm_overpay = bool(data.get("confirm_overpay"))
         if doc.doc_type == "ASSET_PURCHASE":
             doc.asset_id = before["asset_id"]
             if asset_name is not None:

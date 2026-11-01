@@ -123,9 +123,19 @@ def test_supplier_payment_and_its_limits(kitchen):
                                                  "money_account_id": w.cash.id})
     w.s.commit()
     assert L.balance(AP, supplier_id=w.sharif.id) == 0
-    assert code(L.create_document, "SUPPLIER_PAYMENT", D(5), {"supplier_id": w.sharif.id, "amount": 1,
-                                                              "money_account_id": w.cash.id}) == "err_payable_negative"
+    # paying more than owed needs a confirmation, then it is an advance (he owes us)
+    assert code(L.create_document, "SUPPLIER_PAYMENT", D(5), {"supplier_id": w.sharif.id, "amount": 100,
+                                                              "money_account_id": w.cash.id}) == "warn_supplier_overpay"
     w.s.rollback()
+    L.create_document("SUPPLIER_PAYMENT", D(5), {"supplier_id": w.sharif.id, "amount": 100,
+                                                 "money_account_id": w.cash.id, "confirm_overpay": True})
+    w.s.commit()
+    assert L.supplier_owed(w.sharif.id) == -100
+    # the next purchase from him uses the advance first
+    L.create_document("PURCHASE", D(6), {"supplier_id": w.sharif.id, "items": [
+        {"item_id": w.beef.id, "quantity": KG, "unit_price": 3_500}]})
+    w.s.commit()
+    assert L.supplier_owed(w.sharif.id) == 3_400
     # a partner pays a supplier from his own pocket: his capital grows
     before = L.balance(CAP, partner_id=w.contractor.id)
     L.create_document("SUPPLIER_PAYMENT", D(6), {"supplier_id": w.younja.id, "amount": 2_900_000,
