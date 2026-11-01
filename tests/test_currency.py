@@ -256,3 +256,14 @@ def test_rates_page_and_revaluation_through_the_web(ready):
     s.close()
     assert "قيد تسوية فروق العملة" in c.get(f"/documents/{rv.id}").text
     assert c.get(f"/documents/{rv.id}/print").status_code == 200
+
+
+def test_exchange_differences_have_their_own_accounts(opened):
+    from app import chart as COA
+    w = opened
+    L, usd = usd_world(w)
+    doc(L, "CONTRIBUTION", D, partner_id=w.mahmoud.id, money_account_id=usd.id, amount=100_000, rate=37_000)
+    e = doc(L, "EXPENSE", D, category="food", money_account_id=usd.id, amount=10_000, rate=38_000)
+    codes = {COA.code_of(ln) for ln in e.lines}
+    assert "49002" in codes and "49001" not in codes
+    assert COA.parent_of("49002") == "40000" and COA.parent_of("59002") == "50000"

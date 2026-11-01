@@ -18,7 +18,7 @@ journal line (which cash box, which partner...). Here every (control account, ke
     40000 الإيرادات                  41001 إيرادات الخدمات · 49001 أرباح بيع أصول
     50000 المصروفات
       51000 المصاريف التشغيلية       510NN = one per expense category
-      59001 خسائر بيع / شطب أصول
+      59001 خسائر بيع / شطب أصول · 59002 خسائر فروقات العملة (و49002 أرباحها)
 
 Codes are derived, never stored: they stay the same as long as the ids do. Nothing here can change
 a balance; it only presents the existing journal.
@@ -69,7 +69,9 @@ LEAF_RULES = {
     DIST: ("320", "32000", "d"),
     EXP: ("510", "51000", "d"),
 }
-FIXED_LEAVES = {REV: ("41001", "40000", "c"), GAIN: ("49001", "40000", "c"), LOSS: ("59001", "50000", "d")}
+FIXED_LEAVES = {REV: ("41001", "40000", "c"), GAIN: ("49001", "40000", "c"), LOSS: ("59001", "50000", "d"),
+                # exchange differences (category "fx") have their own leaves, as in Al-Aseel
+                "GAIN_FX": ("49002", "40000", "c"), "LOSS_FX": ("59002", "50000", "d")}
 
 
 def _key(prefix: str, n: int | None) -> str:
@@ -78,6 +80,8 @@ def _key(prefix: str, n: int | None) -> str:
 
 def line_code(account: str, *, money_account_id=None, customer_id=None, asset_id=None, partner_id=None,
               category: str = "", item_id=None, supplier_id=None) -> str:
+    if account in (GAIN, LOSS) and category == "fx":
+        return "49002" if account == GAIN else "59002"
     if account in FIXED_LEAVES:
         return FIXED_LEAVES[account][0]
     prefix = LEAF_RULES[account][0]
@@ -200,6 +204,8 @@ def leaf_names(s, t) -> dict[str, str]:
     names["41001"] = t("coa_41001")
     names["49001"] = t("coa_49001")
     names["59001"] = t("coa_59001")
+    names["49002"] = t("coa_49002")
+    names["59002"] = t("coa_59002")
     return names
 
 

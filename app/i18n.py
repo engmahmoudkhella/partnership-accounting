@@ -102,6 +102,8 @@ T: dict[str, tuple[str, str]] = {
     "coa_41001": ("إيرادات الخدمات (المطالبات)", "Service revenue (invoices)"),
     "coa_49001": ("أرباح بيع أصول", "Gain on asset sales"),
     "coa_59001": ("خسائر بيع / شطب أصول", "Loss on asset sales / write-offs"),
+    "coa_49002": ("أرباح فروقات العملة", "Exchange gains"),
+    "coa_59002": ("خسائر فروقات العملة", "Exchange losses"),
     "coa_other_expense": ("مصاريف أخرى", "Other expenses"),
     "coa_capital_of": ("رأس مال {name}", "Capital — {name}"),
     "coa_dist_of": ("أرباح موزعة على {name}", "Distributed to {name}"),
