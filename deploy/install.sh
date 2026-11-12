@@ -6,11 +6,15 @@
 #   * without a domain it serves HTTPS on its own port (default 8443) with a self-signed certificate
 #   * with DOMAIN=... it uses that name and a free Let's Encrypt certificate
 #   * tests the nginx configuration and rolls back its own file if the test fails
+#   * checks everything first and changes nothing if a check fails
+#   * never upgrades packages; installs missing ones only with INSTALL_PACKAGES=1
+#   * refuses to install nginx if Apache/Docker/another server already owns ports 80/443
 #
 # Usage (as root, from the cloned repository):
 #   bash deploy/install.sh                      # https://SERVER-IP:8443
 #   DOMAIN=accounts.example.com bash deploy/install.sh
 # Optional: APP_PORT=8077 HTTPS_PORT=8443 EMAIL=you@example.com
+#           INSTALL_PACKAGES=1   allow installing missing system packages (listed first)
 set -euo pipefail
 
 APP_NAME=partnership-accounting
@@ -35,21 +39,85 @@ case "$APP_DIR" in
   /root/*|/home/*) die "clone the repository under /opt (the service cannot read $APP_DIR): git clone ... /opt/$APP_NAME" ;;
 esac
 
+# ---------------------------------------------------------------------------
+# Pre-flight checks. NOTHING on the server is changed before all of them pass.
+# The server is shared with other sites: this script never upgrades packages,
+# never runs apt-get unless you approve it (INSTALL_PACKAGES=1), and never
+# installs or starts a web server next to one that already owns ports 80/443.
+# ---------------------------------------------------------------------------
+say "Pre-flight checks (no changes yet)"
+command -v ss >/dev/null || die "the 'ss' command (package iproute2) is required for the port checks"
 port_busy() { ss -ltnH "( sport = :$1 )" 2>/dev/null | grep -q .; }
+# name of the program listening on a TCP port (empty if the port is free)
+port_owner() { ss -ltnpH "( sport = :$1 )" 2>/dev/null | grep -o 'users:(("[^"]*"' | head -1 | cut -d'"' -f2; }
+pkg_installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "install ok installed"; }
+
 if ! systemctl is-active --quiet $APP_NAME 2>/dev/null; then
-  port_busy "$APP_PORT" && die "port $APP_PORT is already used by another program. Re-run with APP_PORT=<free port>"
+  port_busy "$APP_PORT" && die "port $APP_PORT is already used by '$(port_owner "$APP_PORT")'. Re-run with APP_PORT=<free port>"
 fi
 if [ -z "$DOMAIN" ] && ! [ -f "$NGINX_SITE" ]; then
-  port_busy "$HTTPS_PORT" && die "port $HTTPS_PORT is already used. Re-run with HTTPS_PORT=<free port>"
+  port_busy "$HTTPS_PORT" && die "port $HTTPS_PORT is already used by '$(port_owner "$HTTPS_PORT")'. Re-run with HTTPS_PORT=<free port>"
 fi
 
-say "Installing system packages (python, nginx, openssl)"
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -q
-apt-get install -y -q python3 python3-venv python3-pip nginx openssl ca-certificates curl >/dev/null
-if [ -n "$DOMAIN" ]; then apt-get install -y -q certbot python3-certbot-nginx >/dev/null; fi
-PYV=$(python3 -c 'import sys; print("%d%02d" % sys.version_info[:2])')
-[ "$PYV" -ge 310 ] || die "Python 3.10+ is required (found $(python3 --version))"
+MISSING=()
+for p in python3 python3-venv openssl ca-certificates curl; do pkg_installed "$p" || MISSING+=("$p"); done
+
+if pkg_installed nginx; then
+  # use the nginx that is already there, but never start or restart it ourselves
+  systemctl is-active --quiet nginx || die "nginx is installed but not running. This script will not start it on a shared server (it may serve other sites). Start it yourself (systemctl start nginx) and re-run."
+else
+  # installing nginx would start its default site on port 80: refuse if anything else uses 80/443
+  for p in 80 443; do
+    if port_busy "$p"; then
+      die "nginx is not installed and port $p is used by '$(port_owner "$p")' (Apache, Docker, Caddy...). Installing nginx here would conflict with it, so nothing was changed. Tell the project owner which web server this machine uses; the app must then be published through that server instead."
+    fi
+  done
+  MISSING+=(nginx)
+fi
+if [ -n "$DOMAIN" ]; then
+  owner80=$(port_owner 80)
+  if [ -n "$owner80" ] && [ "$owner80" != nginx ]; then
+    die "DOMAIN mode needs port 80 for nginx, but port 80 is used by '$owner80'. Nothing was changed."
+  fi
+  for p in certbot python3-certbot-nginx; do pkg_installed "$p" || MISSING+=("$p"); done
+fi
+
+if [ ${#MISSING[@]} -gt 0 ]; then
+  if [ "${INSTALL_PACKAGES:-0}" != 1 ]; then
+    die "these system packages are missing: ${MISSING[*]}
+Nothing was changed. To let this script install ONLY these packages (no upgrades), re-run with:
+  INSTALL_PACKAGES=1 bash deploy/install.sh"
+  fi
+fi
+if pkg_installed python3; then
+  PYV=$(python3 -c 'import sys; print("%d%02d" % sys.version_info[:2])')
+  [ "$PYV" -ge 310 ] || die "Python 3.10+ is required (found $(python3 --version)). Nothing was changed."
+fi
+echo "checks passed"
+
+if [ ${#MISSING[@]} -gt 0 ]; then
+  say "Installing only the missing system packages: ${MISSING[*]}"
+  export DEBIAN_FRONTEND=noninteractive
+  NGINX_FRESH=0
+  if [[ " ${MISSING[*]} " == *" nginx "* ]]; then
+    NGINX_FRESH=1
+    # A freshly installed nginx would start its "Welcome" default site on port 80 at once.
+    # Keep it from starting during the install; it is started below with our site only.
+    [ -e /usr/sbin/policy-rc.d ] && die "/usr/sbin/policy-rc.d already exists; remove it or install nginx yourself. Nothing was changed."
+    printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d && chmod 755 /usr/sbin/policy-rc.d
+    trap 'rm -f /usr/sbin/policy-rc.d' EXIT
+  fi
+  apt-get update -q   # refreshes the package lists only; nothing is upgraded
+  apt-get install -y -q --no-upgrade "${MISSING[@]}" >/dev/null
+  if [ "$NGINX_FRESH" = 1 ]; then
+    rm -f /usr/sbin/policy-rc.d; trap - EXIT
+    rm -f /etc/nginx/sites-enabled/default   # the default site we just installed (nobody else uses it)
+  fi
+  PYV=$(python3 -c 'import sys; print("%d%02d" % sys.version_info[:2])')
+  [ "$PYV" -ge 310 ] || die "Python 3.10+ is required (found $(python3 --version))"
+else
+  say "All system packages already present (apt-get not used)"
+fi
 
 say "Creating service user and folders"
 id -u $APP_USER >/dev/null 2>&1 || useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin $APP_USER
@@ -154,7 +222,11 @@ if ! nginx -t 2>/tmp/$APP_NAME-nginx.log; then
   if [ -n "$BACKUP_SITE" ]; then cp "$BACKUP_SITE" "$NGINX_SITE"; else rm -f "$NGINX_SITE" "$NGINX_LINK"; fi
   die "nginx rejected the configuration; your existing sites were not changed"
 fi
-systemctl reload nginx
+if [ "${NGINX_FRESH:-0}" = 1 ]; then
+  systemctl enable --now nginx   # we installed it in this run, so starting it touches nobody else
+else
+  systemctl reload nginx         # existing nginx: reload only (keeps other sites' connections)
+fi
 
 if [ -n "$DOMAIN" ]; then
   say "Let's Encrypt certificate for $DOMAIN"
