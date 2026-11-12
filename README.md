@@ -129,7 +129,7 @@ bash /opt/partnership-accounting/deploy/install.sh
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest -q tests                  # 452 اختباراً
+python -m pytest -q tests                  # 459 اختباراً
 PROP_EXAMPLES=400 python -m pytest tests/test_property.py   # تشغيل عشوائي مكثف
 node e2e/run.js                            # متصفح حقيقي (Playwright)
 ```
@@ -143,6 +143,7 @@ node e2e/run.js                            # متصفح حقيقي (Playwright)
 | `test_approvals_locks.py` | حد الموافقة، الرفض، إعادة الجولة، الترحيل المؤجل، إقفال الأشهر واعتمادها |
 | `test_property.py` | مئات التسلسلات العشوائية من العمليات (أغلبها خاطئ عمداً)، ويُتحقق بعد كل خطوة من كل الضوابط، ومنها أن لا يستلم شريك أكثر من ربحه |
 | `test_http.py` | النماذج الحقيقية بالعربية والإنجليزية، رسائل الخطأ، الصلاحيات، CSRF، رفع الملفات، اكتمال الترجمة في كل صفحة، التصدير |
+| `test_ratelimit.py` | حد كلمات المرور الخاطئة لكل حساب ولكل IP، في صفحة الدخول وصفحة تغيير كلمة المرور، ومقاومة تزوير X-Forwarded-For |
 | `e2e/run.js` | جولة كاملة في Chromium: إعداد، شركاء، أرصدة، مصاريف، إلغاء، إنجليزي، جوال |
 
 ---

@@ -7,7 +7,6 @@ import datetime as dt
 import io
 import os
 import secrets
-import time
 import uuid
 from collections import defaultdict
 from urllib.parse import urlencode
@@ -51,6 +50,7 @@ from .models import (
     User,
     new_session_key,
 )
+from .ratelimit import FailureLimiter, client_ip
 from .services import CASH, BusinessError, Ledger, check_password, share_display_ppm
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -107,7 +107,11 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
     app.state.engine = engine
     app.state.upload_dir = upload_dir
     app.state.data_dir = data_dir
-    failed_logins: dict[str, list[float]] = defaultdict(list)
+    # wrong passwords: 5 per account and 20 per IP in 5 minutes, on every page that checks a password
+    account_failures = FailureLimiter(limit=5, window=300)
+    ip_failures = FailureLimiter(limit=20, window=300)
+    app.state.account_failures = account_failures
+    app.state.ip_failures = ip_failures
 
     # ------------------------------------------------------------ plumbing
 
@@ -403,21 +407,17 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         nxt = form.get("next") or "/"
         if not nxt.startswith("/") or nxt.startswith("//"):
             nxt = "/"
-        now = time.time()
-        if len(failed_logins) > 10_000:
-            failed_logins.clear()
-        key = username
-        attempts = [x for x in failed_logins[key] if now - x < 300]
-        failed_logins[key] = attempts
-        if len(attempts) >= 5:
+        key, ip = "login:" + username, "ip:" + client_ip(ctx.request)
+        if account_failures.blocked(key) or ip_failures.blocked(ip):
             return render(ctx, "login.html", status_code=429, error=ctx.t("err_too_many_attempts"), next=nxt)
         u = ctx.s.scalar(select(User).where(User.username == username))
         if u is None or not u.active or not check_password(form.get("password") or "", u.password_hash):
-            failed_logins[key].append(now)
+            account_failures.fail(key)
+            ip_failures.fail(ip)
             ctx.L.audit("login_failed", "user", u.id if u else None, note=username)
             ctx.s.commit()
             return render(ctx, "login.html", status_code=401, error=ctx.t("err_login"), next=nxt)
-        failed_logins.pop(key, None)
+        account_failures.reset(key)  # the IP counter is not reset: one good login must not unlock guessing
         start_session(ctx.request, u)
         ctx.L.user = u
         ctx.L.audit("login", "user", u.id)
@@ -462,7 +462,18 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         require(ctx)
         if form.get("new") != form.get("new2"):
             raise BusinessError("err_password_mismatch")
-        ctx.L.change_own_password(form.get("current", ""), form.get("new", ""))
+        # same limits as the login page, so a stolen session cannot be used to guess the password
+        key, ip = f"pw:{ctx.user.id}", "ip:" + client_ip(ctx.request)
+        if account_failures.blocked(key) or ip_failures.blocked(ip):
+            raise BusinessError("err_too_many_attempts")
+        try:
+            ctx.L.change_own_password(form.get("current", ""), form.get("new", ""))
+        except BusinessError as e:
+            if e.code == "err_wrong_password":
+                account_failures.fail(key)
+                ip_failures.fail(ip)
+            raise
+        account_failures.reset(key)
         start_session(ctx.request, ctx.user)  # every other session is now logged out; keep this one
         flash(ctx.request, "ok", ctx.t("msg_saved"))
         raise_commit_redirect(ctx, "/account")
