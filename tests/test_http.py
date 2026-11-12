@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 
 from app.i18n import T
 from app.main import create_app
-from app.models import Asset, Document, MoneyAccount, Partner, Project, ShareVersion, User
+from app.models import Asset, AuditLog, Document, MoneyAccount, Partner, Project, ShareVersion, User
 from app.services import CASH, Ledger, hash_password
 
 TODAY = dt.date(2026, 10, 31)
@@ -193,6 +193,112 @@ def test_inactive_user_session_is_dropped(ready):
     u.active = False
     s.commit()
     assert c.get("/documents", follow_redirects=False).status_code == 303
+
+
+def second_client(c, username, password="password123"):
+    other = Client(c.app)
+    other.login(username, password)
+    assert other.get("/documents", follow_redirects=False).status_code == 200
+    return other
+
+
+def test_password_change_logs_out_other_sessions_keeps_this_one(ready):
+    c = ready
+    add_user(c, "acc", "accountant")
+    c.login("acc")
+    thief = second_client(c, "acc")  # e.g. a stolen cookie, or a forgotten login on another device
+    r = c.post("/account/password", {"current": "password123", "new": "newpass123", "new2": "newpass123"},
+               page="/account")
+    assert r.status_code == 200 and "flash ok" in r.text
+    assert thief.get("/documents", follow_redirects=False).status_code == 303
+    assert c.get("/documents", follow_redirects=False).status_code == 200
+    assert c.login("acc", "newpass123").status_code == 200
+
+
+def test_admin_password_reset_logs_out_that_user(ready):
+    c = ready
+    add_user(c, "acc", "accountant")
+    victim = second_client(c, "acc")
+    s = c.db()
+    uid = s.scalar(select(User.id).where(User.username == "acc"))
+    s.close()
+    c.login("admin")
+    r = c.post("/users/save", {"id": str(uid), "username": "acc", "full_name": "acc", "role": "accountant",
+                               "password": "resetpass1", "password2": "resetpass1"}, page="/users")
+    assert "flash ok" in r.text, r.text
+    assert victim.get("/documents", follow_redirects=False).status_code == 303
+    assert c.get("/users", follow_redirects=False).status_code == 200  # the admin himself stays in
+
+
+def test_admin_changing_own_password_on_users_page_stays_logged_in(ready):
+    c = ready
+    other_device = second_client(c, "admin")
+    s = c.db()
+    uid = s.scalar(select(User.id).where(User.username == "admin"))
+    s.close()
+    r = c.post("/users/save", {"id": str(uid), "username": "admin", "full_name": "المدير", "role": "admin",
+                               "password": "adminpass2", "password2": "adminpass2"}, page="/users")
+    assert "flash ok" in r.text, r.text
+    assert c.get("/users", follow_redirects=False).status_code == 200
+    assert other_device.get("/users", follow_redirects=False).status_code == 303
+
+
+def test_disabled_then_enabled_user_old_session_stays_dead(ready):
+    c = ready
+    add_user(c, "acc", "accountant")
+    old = second_client(c, "acc")
+    s = c.db()
+    uid = s.scalar(select(User.id).where(User.username == "acc"))
+    s.close()
+    c.post(f"/users/{uid}/active", {"active": "0"}, page="/users")
+    c.post(f"/users/{uid}/active", {"active": "1"}, page="/users")
+    assert old.get("/documents", follow_redirects=False).status_code == 303
+    assert second_client(c, "acc")  # a fresh login works
+
+
+def test_deleted_user_session_does_not_pass_to_a_new_user_with_the_same_id(ready):
+    c = ready
+    add_user(c, "acc", "accountant")
+    old = second_client(c, "acc")
+    s = c.db()
+    u = s.scalar(select(User).where(User.username == "acc"))
+    uid = u.id
+    # (the app refuses to delete a user with history; remove it here to test the mechanism itself)
+    s.execute(AuditLog.__table__.delete().where(AuditLog.user_id == uid))
+    s.delete(u)
+    s.commit()
+    s.add(User(id=uid, username="acc2", full_name="acc2", password_hash=hash_password("password123"),
+               role="admin"))
+    s.commit()
+    s.close()
+    assert old.get("/users", follow_redirects=False).status_code == 303
+
+
+def test_session_key_not_shown_in_audit_log(ready):
+    c = ready
+    add_user(c, "acc", "accountant")
+    s = c.db()
+    u = s.scalar(select(User).where(User.username == "acc"))
+    key = u.session_key
+    s.close()
+    c.post(f"/users/{u.id}/active", {"active": "0"}, page="/users")
+    s = c.db()
+    new_key = s.scalar(select(User.session_key).where(User.username == "acc"))
+    s.close()
+    html = c.get("/audit").text
+    assert key and new_key and key not in html and new_key not in html
+
+
+def test_sessions_from_before_the_upgrade_must_log_in_again(ready):
+    c = ready
+    c.login("admin")
+    s = c.db()
+    s.execute(User.__table__.update().values(session_key=""))  # what the migration gives old rows
+    s.commit()
+    s.close()
+    assert c.get("/documents", follow_redirects=False).status_code == 303
+    assert c.login("admin").status_code == 200
+    assert c.get("/documents", follow_redirects=False).status_code == 200
 
 
 # ------------------------------------------------------------------ Arabic / English number entry through forms

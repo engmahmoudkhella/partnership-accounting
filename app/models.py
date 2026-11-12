@@ -7,6 +7,7 @@ Quantities are thousandths. Dates are ``datetime.date``.
 from __future__ import annotations
 
 import datetime as dt
+import secrets
 
 from sqlalchemy import (
     JSON,
@@ -20,6 +21,11 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+def new_session_key() -> str:
+    """Random per-user key stored in each login cookie. Replacing it logs out every session of that user."""
+    return secrets.token_urlsafe(24)
 
 
 def utcnow() -> dt.datetime:
@@ -48,6 +54,8 @@ class User(Base):
     digits: Mapped[str] = mapped_column(String(4), default="latn")
     # what this user may see and do (see permissions.py); empty = his role's defaults
     permissions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # must match the "sk" value in the session cookie; rotated on password change / deactivation
+    session_key: Mapped[str] = mapped_column(String(64), default=new_session_key)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
 
     partner = relationship("Partner")

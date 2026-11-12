@@ -60,6 +60,7 @@ from .models import (
     ShareLine,
     ShareVersion,
     User,
+    new_session_key,
     utcnow,
 )
 from . import permissions as PERM
@@ -768,7 +769,7 @@ class Ledger:
             v = getattr(obj, col.key)
             if isinstance(v, (dt.date, dt.datetime)):
                 v = v.isoformat()
-            if col.key == "password_hash":
+            if col.key in ("password_hash", "session_key"):
                 v = "***"
             out[col.key] = v
         return out
@@ -966,6 +967,7 @@ class Ledger:
             user.permissions = PERM.clean(permissions, role)
         if password:
             user.password_hash = hash_password(password)
+            user.session_key = new_session_key()  # a new password logs out every session of this user
         self.s.flush()
         self.audit("update" if before else "create", "user", user.id, before, self._entity_snapshot(user))
         return user
@@ -988,6 +990,8 @@ class Ledger:
                 raise BusinessError("err_partner_has_user")
         before = self._entity_snapshot(user)
         user.active = active
+        if not active:
+            user.session_key = new_session_key()  # re-enabling him later does not revive old sessions
         self.s.flush()
         self.audit("activate" if active else "deactivate", "user", user.id, before, self._entity_snapshot(user))
 
@@ -1015,6 +1019,7 @@ class Ledger:
         if len(new or "") < 8:
             raise BusinessError("err_password_short")
         self.user.password_hash = hash_password(new)
+        self.user.session_key = new_session_key()  # logs out his other sessions; the route renews this one
         self.audit("change_password", "user", self.user.id)
 
     def set_own_preferences(self, lang: str, digits: str):
