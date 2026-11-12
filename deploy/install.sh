@@ -29,6 +29,8 @@ DOMAIN=${DOMAIN:-}
 EMAIL=${EMAIL:-}
 NGINX_SITE=/etc/nginx/sites-available/$APP_NAME.conf
 NGINX_LINK=/etc/nginx/sites-enabled/$APP_NAME.conf
+MAINT_FLAG=/run/$APP_NAME.maintenance   # read by nginx; /run is cleared on reboot
+NGINX_FRESH=0
 
 say() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 die() { printf '\n\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
@@ -207,7 +209,19 @@ server {
     add_header X-Content-Type-Options nosniff always;
     add_header X-Frame-Options DENY always;
     add_header Referrer-Policy same-origin always;
+    add_header X-Robots-Tag "noindex, nofollow" always;
+    # maintenance page while deploy/update.sh runs (it creates and removes this flag)
+    error_page 503 @maintenance;
+    location @maintenance {
+        default_type "text/html; charset=utf-8";
+        add_header Retry-After 60 always;
+        add_header X-Content-Type-Options nosniff always;
+        add_header X-Frame-Options DENY always;
+        add_header X-Robots-Tag "noindex, nofollow" always;
+        return 503 '<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><title>تحديث</title><body style="font-family:sans-serif;text-align:center;padding:4em">النظام قيد التحديث، يعود خلال دقيقة.<br>Updating, back in a minute.</body></html>';
+    }
     location / {
+        if (-f $MAINT_FLAG) { return 503; }
         proxy_pass http://127.0.0.1:$APP_PORT;
         proxy_set_header Host \$host;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
