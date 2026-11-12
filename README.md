@@ -128,7 +128,15 @@ git -C /opt/partnership-accounting config core.sshCommand "ssh -i /root/.ssh/pa_
 bash /opt/partnership-accounting/deploy/install.sh
 ```
 
-التحديث لاحقاً: `bash /opt/partnership-accounting/deploy/update.sh` (يأخذ نسخة احتياطية أولاً).
+التحديث لاحقاً: `bash /opt/partnership-accounting/deploy/update.sh`. يقوم السكربت بالخطوات التالية:
+1. يفحص كل شيء أولاً، ويتوقف بلا أي تغيير إن عُدّلت ملفات المشروع على الخادم يدوياً.
+2. يعرض صفحة «قيد التحديث» للزوار، ويوقف الخدمة.
+3. يأخذ نسخة احتياطية من قاعدة البيانات، ولا يكمل إن فشلت.
+4. يحدّث ويفحص صحة النظام. إن فشل يرجع تلقائياً إلى النسخة السابقة من الكود **وقاعدة البيانات**.
+5. يفحص ترويسات الأمان عبر nginx.
+
+إن كان التنصيب قديماً (قبل إضافة صفحة الصيانة وX-Robots-Tag)، شغّل `install.sh` مرة واحدة لتحديث ملف nginx الخاص بالنظام.
+اختبار التحديث في حاوية: `bash deploy/test/update-test.sh`.
 السجلات: `journalctl -u partnership-accounting -f`.
 
 ## الاختبارات
