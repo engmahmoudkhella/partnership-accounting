@@ -49,6 +49,7 @@ from .models import (
     CurrencyRate,
     ShareVersion,
     User,
+    new_session_key,
 )
 from .services import CASH, BusinessError, Ledger, check_password, share_display_ppm
 
@@ -110,6 +111,18 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
 
     # ------------------------------------------------------------ plumbing
 
+    def session_key_ok(request: Request, user: User) -> bool:
+        sent = request.session.get("sk")
+        return bool(sent) and bool(user.session_key) and secrets.compare_digest(str(sent), user.session_key)
+
+    def start_session(request: Request, user: User):
+        """New login session for user: fresh cookie contents bound to his current session key."""
+        if not user.session_key:  # accounts created before session keys existed
+            user.session_key = new_session_key()
+        request.session.clear()
+        request.session["uid"] = user.id
+        request.session["sk"] = user.session_key
+
     class Ctx:
         """Per-request context: db session, user, ledger, language."""
 
@@ -118,7 +131,8 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             self.s = Session()
             uid = request.session.get("uid")
             self.user = self.s.get(User, uid) if uid else None
-            if self.user is not None and not self.user.active:
+            if self.user is not None and not (self.user.active and session_key_ok(request, self.user)):
+                # disabled, or the password changed since this login (or the user was deleted and the id reused)
                 self.user = None
                 request.session.clear()
             self.lang = (self.user.lang if self.user else request.session.get("lang")) or "ar"
@@ -367,8 +381,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         if company:
             ctx.L.set_setting("company_name", company)
         ctx.s.flush()
-        ctx.request.session.clear()
-        ctx.request.session["uid"] = u.id
+        start_session(ctx.request, u)
         raise_commit_redirect(ctx, "/")
 
     def raise_commit_redirect(ctx, url):
@@ -405,8 +418,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
             ctx.s.commit()
             return render(ctx, "login.html", status_code=401, error=ctx.t("err_login"), next=nxt)
         failed_logins.pop(key, None)
-        ctx.request.session.clear()
-        ctx.request.session["uid"] = u.id
+        start_session(ctx.request, u)
         ctx.L.user = u
         ctx.L.audit("login", "user", u.id)
         raise_commit_redirect(ctx, nxt)
@@ -451,6 +463,7 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
         if form.get("new") != form.get("new2"):
             raise BusinessError("err_password_mismatch")
         ctx.L.change_own_password(form.get("current", ""), form.get("new", ""))
+        start_session(ctx.request, ctx.user)  # every other session is now logged out; keep this one
         flash(ctx.request, "ok", ctx.t("msg_saved"))
         raise_commit_redirect(ctx, "/account")
 
@@ -1503,6 +1516,8 @@ def create_app(database_url: str | None = None, data_dir: str | None = None, tod
                         role=form.get("role", ""), partner_id=N.parse_id(pid),
                         password=form.get("password") or None, lang=form.get("lang", "ar"),
                         digits=form.get("digits", "latn"), permissions=_perms_from_form(form))
+        if u is not None and u.id == ctx.user.id and form.get("password"):
+            start_session(ctx.request, ctx.user)  # admin changed his own password here: keep this session
         flash(ctx.request, "ok", ctx.t("msg_saved"))
         raise_commit_redirect(ctx, "/users")
 

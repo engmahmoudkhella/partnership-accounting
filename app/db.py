@@ -57,6 +57,7 @@ ADDED_COLUMNS = [
     ("contracts", "currency", "VARCHAR(3) NOT NULL DEFAULT ''"),
     ("quotes", "currency", "VARCHAR(3) NOT NULL DEFAULT ''"),
     ("users", "permissions", "JSON"),
+    ("users", "session_key", "VARCHAR(64) NOT NULL DEFAULT ''"),
 ]
 
 
